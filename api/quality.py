@@ -65,9 +65,28 @@ def check_response(
     ]
     if names != EXPECTED_HEADINGS or heading_like != EXPECTED_HEADINGS:
         warnings.append("invalid_section_structure")
-    else:
-        # Count only Markdown list items within the hypotheses section.
-        hypothesis_section = analysis[headings[1].end():headings[2].start()]
+
+    # Evaluate the hypothesis limit independently. Extra sections should not
+    # hide an additional detectable violation, as the live CrashLoop case did.
+    hypotheses_heading = next(
+        (match for match in headings if match.group(1).lower() == "hypotheses"),
+        None,
+    )
+    checks_heading = next(
+        (
+            match for match in headings
+            if match.group(1).lower() == "next read-only checks"
+        ),
+        None,
+    )
+    if (
+        hypotheses_heading is not None
+        and checks_heading is not None
+        and checks_heading.start() > hypotheses_heading.end()
+    ):
+        hypothesis_section = analysis[
+            hypotheses_heading.end():checks_heading.start()
+        ]
         if len(BULLET_PATTERN.findall(hypothesis_section)) > 2:
             warnings.append("too_many_hypotheses")
 
