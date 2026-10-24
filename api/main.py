@@ -18,7 +18,7 @@ from typing import Literal
 
 from api.retrieval import load_runbooks, search_runbooks
 
-app = FastAPI(title="Sentinel AI Platform", version="0.5.0")
+app = FastAPI(title="Sentinel AI Platform", version="0.6.0")
 
 # JSON logs go to container stdout. Deliberately omit request bodies, prompts,
 # response text, query parameters and incoming identity/credential headers.
@@ -65,11 +65,17 @@ Never infer security problems, corruption, or an attack merely because input
 is untrusted or incomplete. Do not claim to have checked live infrastructure.
 Never invent logs, measurements, incidents, causes, or citations.
 
-Respond concisely under exactly these headings:
-Observed facts: repeat only meaningful facts explicitly in the report.
-Hypotheses: plausible explanations, explicitly unconfirmed.
-Next read-only checks: concrete, safe checks and what each could confirm.
-Missing evidence: what is needed before diagnosing root cause.
+Produce fewer than 240 words, using exactly these four headings and no others:
+Observed facts: at most 3 bullets, only meaningful facts explicitly supplied.
+Hypotheses: at most 2 bullets, mark each UNCONFIRMED.
+Next read-only checks: at most 4 concrete, safe checks, with the
+reason for each; cite [runbook-ID] beside a check supported by the reference.
+Missing evidence: at most 3 bullets of information needed before root cause.
+
+Never assert that a cause IS or IS NOT responsible without direct confirming
+evidence. A pod being Ready does not rule out downstream dependency failure.
+Upstream connection timeouts do not establish which hop caused an ingress 503.
+Do not add extra sections, echo the entire runbook, or repeat instructions.
 
 If the report is placeholder text, nonsensical, or too vague, say that the
 evidence is insufficient and ask for actual symptoms; do NOT invent a cause.
@@ -168,6 +174,10 @@ class InvestigationResponse(BaseModel):
     metrics: InferenceMetrics
     sources: list[RunbookSource] = Field(default_factory=list)
     retrieval_status: Literal["matched", "no_match"]
+    # Ollama may return "stop" for natural finish or "length" for token cap.
+    # None indicates it did not provide a completion reason.
+    completion_reason: str | None = None
+    output_truncated: bool | None = None
     advisory_only: bool = True
 
 
@@ -266,7 +276,7 @@ async def investigate(
         "prompt": prompt,
         "stream": False,
         "keep_alive": "10m",
-        "options": {"num_predict": 400, "temperature": 0},
+        "options": {"num_predict": 512, "temperature": 0},
     }
     try:
         timeout = httpx.Timeout(120.0, connect=5.0)
@@ -329,6 +339,19 @@ async def investigate(
         "model": OLLAMA_MODEL,
         **metrics.model_dump(),
     }))
+    raw_reason = result.get("done_reason")
+    completion_reason = raw_reason if isinstance(raw_reason, str) else None
+    if completion_reason is None:
+        truncated = None
+    else:
+        truncated = completion_reason == "length"
+
+    logger.info(json.dumps({
+        "event": "inference_completion",
+        "request_id": request.state.request_id,
+        "completion_reason": completion_reason,
+        "output_truncated": truncated,
+    }))
     return InvestigationResponse(
         request_id=request.state.request_id,
         model=OLLAMA_MODEL,
@@ -336,4 +359,6 @@ async def investigate(
         metrics=metrics,
         sources=sources,
         retrieval_status="matched" if matches else "no_match",
+        completion_reason=completion_reason,
+        output_truncated=truncated,
     )
