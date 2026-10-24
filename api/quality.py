@@ -23,8 +23,8 @@ EXPECTED_HEADINGS = [
 # Capture unexpected extra standalone heading lines (e.g. Safety Boundary).
 # This is only a formatting heuristic, not a semantic claim validator.
 GENERIC_HEADING_PATTERN = re.compile(
-    r"(?im)^\\s*(?:#{1,6}\\s*)?\\*{0,2}"
-    r"([A-Za-z][A-Za-z -]{1,60}):\\*{0,2}\\s*$"
+    r"(?im)^\s*(?:#{1,6}\s*)?\*{0,2}"
+    r"([A-Za-z][A-Za-z -]{1,60}):\*{0,2}\s*$"
 )
 BULLET_PATTERN = re.compile(r"(?m)^\s*(?:[-*]|\d+[.)])\s+")
 
