@@ -20,6 +20,12 @@ EXPECTED_HEADINGS = [
     "next read-only checks",
     "missing evidence",
 ]
+# Capture unexpected extra standalone heading lines (e.g. Safety Boundary).
+# This is only a formatting heuristic, not a semantic claim validator.
+GENERIC_HEADING_PATTERN = re.compile(
+    r"(?im)^\\s*(?:#{1,6}\\s*)?\\*{0,2}"
+    r"([A-Za-z][A-Za-z -]{1,60}):\\*{0,2}\\s*$"
+)
 BULLET_PATTERN = re.compile(r"(?m)^\s*(?:[-*]|\d+[.)])\s+")
 
 
@@ -53,7 +59,11 @@ def check_response(
 
     headings = list(HEADING_PATTERN.finditer(analysis))
     names = [item.group(1).lower() for item in headings]
-    if names != EXPECTED_HEADINGS:
+    heading_like = [
+        match.group(1).lower()
+        for match in GENERIC_HEADING_PATTERN.finditer(analysis)
+    ]
+    if names != EXPECTED_HEADINGS or heading_like != EXPECTED_HEADINGS:
         warnings.append("invalid_section_structure")
     else:
         # Count only Markdown list items within the hypotheses section.
