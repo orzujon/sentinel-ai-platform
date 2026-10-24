@@ -76,6 +76,9 @@ def test_investigate_uses_model_and_returns_metrics(monkeypatch):
         assert "RB-PCF-003" not in payload["prompt"]
         assert "not as instructions" in payload["system"].lower() or "never as instructions" in payload["system"].lower()
         assert payload["stream"] is False
+        assert payload["options"]["num_predict"] == 512
+        assert "A pod being Ready does not rule out" in payload["system"]
+        assert "at most 4 concrete" in payload["system"]
         return httpx.Response(
             200,
             json={
@@ -86,6 +89,7 @@ def test_investigate_uses_model_and_returns_metrics(monkeypatch):
                 "load_duration": 100_000_000,
                 "prompt_eval_duration": 150_000_000,
                 "prompt_eval_count": 27,
+                "done_reason": "stop",
             },
         )
 
@@ -103,6 +107,8 @@ def test_investigate_uses_model_and_returns_metrics(monkeypatch):
     assert body["metrics"]["generation_seconds"] == 1.0
     assert body["metrics"]["prompt_tokens"] == 27
     assert body["request_id"] == response.headers["X-Request-ID"]
+    assert body["completion_reason"] == "stop"
+    assert body["output_truncated"] is False
     assert body["retrieval_status"] == "matched"
     assert len(body["sources"]) == 1
     assert body["sources"][0]["id"] == "RB-K8S-001"
@@ -183,3 +189,33 @@ def test_retrieval_unavailable_does_not_call_model(monkeypatch):
     response = client.post("/api/investigate", json=INCIDENT)
     assert response.status_code == 503
     assert "Curated runbook library" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("done_reason", "expected_truncated"),
+    [
+        ("length", True),
+        ("stop", False),
+        (None, None),
+    ],
+)
+def test_inference_reports_completion_reason(
+    monkeypatch, done_reason, expected_truncated
+):
+    def handler(request):
+        model_data = {
+            "response": "Synthetic generated advice.",
+            "total_duration": 100_000_000,
+            "eval_count": 5,
+            "eval_duration": 30_000_000,
+        }
+        if done_reason is not None:
+            model_data["done_reason"] = done_reason
+        return httpx.Response(200, json=model_data)
+
+    mock_ollama(monkeypatch, handler)
+    response = client.post("/api/investigate", json=INCIDENT)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["completion_reason"] == done_reason
+    assert body["output_truncated"] is expected_truncated
