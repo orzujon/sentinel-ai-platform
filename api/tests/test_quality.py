@@ -76,8 +76,7 @@ def test_extra_heading_flagged():
         source_ids=["RB-K8S-001"],
         completion_reason="stop",
     )
-    # Additional *unrecognised* sections are not currently detected. Formal
-    # checks are intentionally narrow; this remains a human review concern.
+    assert "invalid_section_structure" in result.warnings
     assert result.human_review_required is True
 
 
