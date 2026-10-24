@@ -71,6 +71,9 @@ def test_investigate_uses_model_and_returns_metrics(monkeypatch):
         payload = json.loads(request.content)
         assert payload["model"] == "llama3.2:1b"
         assert "payments-api" in payload["prompt"]
+        assert "RB-K8S-001" in payload["prompt"]
+        assert "kubectl get endpointslices" in payload["prompt"]
+        assert "RB-PCF-003" not in payload["prompt"]
         assert "not as instructions" in payload["system"].lower() or "never as instructions" in payload["system"].lower()
         assert payload["stream"] is False
         return httpx.Response(
@@ -100,6 +103,12 @@ def test_investigate_uses_model_and_returns_metrics(monkeypatch):
     assert body["metrics"]["generation_seconds"] == 1.0
     assert body["metrics"]["prompt_tokens"] == 27
     assert body["request_id"] == response.headers["X-Request-ID"]
+    assert body["retrieval_status"] == "matched"
+    assert len(body["sources"]) == 1
+    assert body["sources"][0]["id"] == "RB-K8S-001"
+    assert body["sources"][0]["path"] == (
+        "knowledge/runbooks/kubernetes-ingress-503.md"
+    )
 
 
 @pytest.mark.parametrize(
@@ -135,3 +144,42 @@ def test_inference_failures_are_not_success(monkeypatch, kind, expected_status):
     response = client.post("/api/investigate", json=INCIDENT)
     assert response.status_code == expected_status
     assert response.json()["detail"]
+
+
+def test_unrelated_incident_does_not_claim_a_source(monkeypatch):
+    unrelated = {
+        "service": "kitten",
+        "environment": "lab",
+        "symptoms": "Purring, grooming and sleeping after feeding.",
+        "evidence": "No infrastructure symptoms are reported.",
+    }
+
+    def handler(request):
+        payload = json.loads(request.content)
+        assert "NO MATCHING CURATED RUNBOOK" in payload["prompt"]
+        assert "RB-K8S-001" not in payload["prompt"]
+        return httpx.Response(
+            200,
+            json={
+                "response": "Evidence is insufficient for an infrastructure diagnosis.",
+                "total_duration": 1_000_000_000,
+                "eval_count": 10,
+                "eval_duration": 100_000_000,
+            },
+        )
+
+    mock_ollama(monkeypatch, handler)
+    response = client.post("/api/investigate", json=unrelated)
+    assert response.status_code == 200
+    assert response.json()["retrieval_status"] == "no_match"
+    assert response.json()["sources"] == []
+
+
+def test_retrieval_unavailable_does_not_call_model(monkeypatch):
+    def offline(query_text, *, top_k):
+        raise FileNotFoundError("simulated missing runbook directory")
+
+    monkeypatch.setattr(main, "search_runbooks", offline)
+    response = client.post("/api/investigate", json=INCIDENT)
+    assert response.status_code == 503
+    assert "Curated runbook library" in response.json()["detail"]
