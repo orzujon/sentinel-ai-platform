@@ -9,7 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
     && useradd --uid 10001 --create-home sentinel
 
 # Build from repository root, so curated runbooks are included in the image.
-COPY --chown=sentinel:sentinel api/main.py api/retrieval.py api/__init__.py ./api/
+COPY --chown=sentinel:sentinel api/main.py api/retrieval.py api/quality.py api/__init__.py ./api/
 COPY --chown=sentinel:sentinel knowledge/runbooks/ ./knowledge/runbooks/
 
 USER sentinel
