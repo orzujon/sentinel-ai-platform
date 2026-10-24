@@ -80,10 +80,10 @@ $r.metrics | Format-List
 ```
 
 * A matching incident should return `retrieval_status: matched` with `RB-K8S-001`.
-* If nothing relevant matches, `sources` is empty and `retrieval_status` is `no_match`. The model may still make unsupported claims; human review is required.
+* If nothing relevant matches, Sentinel **abstains without invoking Ollama**, returns `generation_status=abstained`, `sources=[]`, `model=null`, `metrics=null` and an explicit out-of-scope message. This protects exact no-match cases only; lexical false positives remain possible.
 * Source metadata comes from deterministic application retrieval, **not** the model's claims. Model-produced bracket citations are not yet independently verified.
 * `response_checks` flags mechanical errors (missing/unknown citations, section formatting, too many hypothesis bullets, and incomplete generation). Even when `status=formal_checks_passed`, **`human_review_required=true`**: it does not detect hallucinations or prove root-cause correctness.
-* Evaluations: [First RAG response](evaluations/2026-10-24-first-rag-assessment.md) and [second RAG response](evaluations/2026-10-24-second-rag-assessment.md).
+* Evaluations: [First RAG response](evaluations/2026-10-24-first-rag-assessment.md) and [second RAG response](evaluations/2026-10-24-second-rag-assessment.md). The [four-case benchmark](evaluations/2026-10-24-four-case-baseline.md) records a significant no-match citation failure observed before abstention was implemented.
 * The three-file keyword retriever is not a vector database, a robust abstention classifier or a complete prompt-injection defence.
 
 ## Day 2 labelled evaluation suite
