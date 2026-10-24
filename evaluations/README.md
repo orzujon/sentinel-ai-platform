@@ -23,6 +23,20 @@ If your PowerShell environment blocks script execution, do not blindly change
 security policy. Use the individual API request commands from the project
 README instead and report the issue.
 
+## Deterministic abstention (added after first live evaluation)
+
+For incidents with **no matching curated source**, the API no longer
+contacts Ollama. It returns `retrieval_status=no_match`,
+`generation_status=abstained`, `model=null`, `metrics=null`,
+`response_checks.status=abstained` and a short fixed explanation.
+
+This is a documented operational guardrail against invented citations
+in out-of-scope cases. It does not prevent a lexical false-positive
+match or hallucination on an in-scope case. When replaying the suite,
+expect **3 generated answers and 1 abstention**, not four generated
+answers. Compare new data with the [initial four-case baseline]
+(2026-10-24-four-case-baseline.md) carefully.
+
 ## Metrics you may report
 
 **Retrieval accuracy@1 (on this test set):** correctly retrieved expected
