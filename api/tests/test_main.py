@@ -110,6 +110,7 @@ def test_investigate_uses_model_and_returns_metrics(monkeypatch):
     assert body["completion_reason"] == "stop"
     assert body["output_truncated"] is False
     assert body["retrieval_status"] == "matched"
+    assert body["generation_status"] == "generated"
     assert len(body["sources"]) == 1
     assert body["sources"][0]["id"] == "RB-K8S-001"
     assert body["sources"][0]["path"] == (
@@ -152,33 +153,34 @@ def test_inference_failures_are_not_success(monkeypatch, kind, expected_status):
     assert response.json()["detail"]
 
 
-def test_unrelated_incident_does_not_claim_a_source(monkeypatch):
+def test_unrelated_incident_abstains_without_invoking_model(monkeypatch):
     unrelated = {
-        "service": "kitten",
+        "service": "office-printer",
         "environment": "lab",
-        "symptoms": "Purring, grooming and sleeping after feeding.",
-        "evidence": "No infrastructure symptoms are reported.",
+        "symptoms": "The office printer squeaks and jams paper repeatedly.",
+        "evidence": "The display shows a paper-jam warning.",
     }
 
-    def handler(request):
-        payload = json.loads(request.content)
-        assert "NO MATCHING CURATED RUNBOOK" in payload["prompt"]
-        assert "RB-K8S-001" not in payload["prompt"]
-        return httpx.Response(
-            200,
-            json={
-                "response": "Evidence is insufficient for an infrastructure diagnosis.",
-                "total_duration": 1_000_000_000,
-                "eval_count": 10,
-                "eval_duration": 100_000_000,
-            },
-        )
+    def forbidden_model_call(**kwargs):
+        raise AssertionError("No model call allowed without relevant runbook")
 
-    mock_ollama(monkeypatch, handler)
+    monkeypatch.setattr(main.httpx, "AsyncClient", forbidden_model_call)
     response = client.post("/api/investigate", json=unrelated)
     assert response.status_code == 200
-    assert response.json()["retrieval_status"] == "no_match"
-    assert response.json()["sources"] == []
+    body = response.json()
+    assert body["retrieval_status"] == "no_match"
+    assert body["generation_status"] == "abstained"
+    assert body["sources"] == []
+    assert body["model"] is None
+    assert body["metrics"] is None
+    assert body["completion_reason"] is None
+    assert body["response_checks"] == {
+        "status": "abstained",
+        "warnings": [],
+        "human_review_required": True,
+    }
+    assert "No AI investigation was generated" in body["analysis"]
+    assert "RB-" not in body["analysis"]
 
 
 def test_retrieval_unavailable_does_not_call_model(monkeypatch):
