@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated local evaluation reports may contain user-submitted incident text.
+evaluations/reports/
