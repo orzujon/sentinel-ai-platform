@@ -5,12 +5,14 @@ on:
     paths:
       - "api/**"
       - "knowledge/**"
+      - "evaluations/cases/**"
       - "compose.yaml"
       - ".github/workflows/api-checks.yml"
   pull_request:
     paths:
       - "api/**"
       - "knowledge/**"
+      - "evaluations/cases/**"
       - "compose.yaml"
       - ".github/workflows/api-checks.yml"
   workflow_dispatch:
