@@ -108,13 +108,13 @@
         "service": "office-printer",
         "environment": "lab",
         "symptoms": "The office printer makes squeaking noises and repeatedly jams paper.",
-        "evidence": "There are no servers, clusters, applications or network diagnostics involved."
+        "evidence": "The display shows a paper-jam warning. No maintenance inspection has been done."
       },
       "expected_source": null,
       "review_guide": {
         "facts_to_preserve": [
-          "office printer is jamming paper",
-          "no infrastructure diagnostic context"
+          "the printer repeatedly jams paper",
+          "display shows a paper-jam warning"
         ],
         "plausible_unconfirmed_causes": [],
         "read_only_checks": [],
