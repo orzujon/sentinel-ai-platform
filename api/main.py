@@ -4,15 +4,53 @@ Day 1 prototype: local-only, no authentication and not suitable for production.
 Use synthetic, non-sensitive incident reports exclusively.
 """
 
+import json
+import logging
 import os
+import sys
+import time
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Literal
 
-app = FastAPI(title="Sentinel AI Platform", version="0.2.0")
+app = FastAPI(title="Sentinel AI Platform", version="0.3.0")
+
+# JSON logs go to container stdout. Deliberately omit request bodies, prompts,
+# response text, query parameters and incoming identity/credential headers.
+logger = logging.getLogger("sentinel.api")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    logger.addHandler(logging.StreamHandler(sys.stdout))
+logger.propagate = False
+
+
+@app.middleware("http")
+async def request_logging(request: Request, call_next):
+    request_id = str(uuid4())
+    request.state.request_id = request_id
+    started = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers["X-Request-ID"] = request_id
+        return response
+    finally:
+        # Use the *route template*, not a user-supplied URL/path or payload.
+        matched_route = request.scope.get("route")
+        route = getattr(matched_route, "path", "/unmatched")
+        logger.info(json.dumps({
+            "event": "http_request",
+            "request_id": request_id,
+            "method": request.method,
+            "route": route,
+            "status_code": status_code,
+            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+        }))
+
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ai-ollama:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:1b")
@@ -63,6 +101,11 @@ class InferenceMetrics(BaseModel):
     total_seconds: float
     generated_tokens: int
     tokens_per_second: float | None
+    # Ollama phase timings; null means the API did not supply that field.
+    load_seconds: float | None = None
+    prompt_seconds: float | None = None
+    generation_seconds: float | None = None
+    prompt_tokens: int | None = None
 
 
 class InvestigationResponse(BaseModel):
@@ -110,7 +153,9 @@ async def readyz() -> dict[str, str]:
 
 
 @app.post("/api/investigate", response_model=InvestigationResponse, tags=["incidents"])
-async def investigate(incident: IncidentRequest) -> InvestigationResponse:
+async def investigate(
+    incident: IncidentRequest, request: Request
+) -> InvestigationResponse:
     """Ask the local Ollama model to suggest evidence-based diagnostic checks.
 
     No shell commands run. No host access. No production data should be sent.
@@ -166,17 +211,36 @@ async def investigate(incident: IncidentRequest) -> InvestigationResponse:
     if not all(isinstance(value, (int, float)) for value in (token_count, generation_ns, total_ns)):
         raise HTTPException(status_code=502, detail="Inference timing data is invalid")
 
+    def seconds_or_none(key: str) -> float | None:
+        value = result.get(key)
+        return round(value / 1e9, 3) if isinstance(value, (int, float)) else None
+
+    prompt_tokens = result.get("prompt_eval_count")
+    if not isinstance(prompt_tokens, int):
+        prompt_tokens = None
+
+    metrics = InferenceMetrics(
+        total_seconds=round(total_ns / 1e9, 3),
+        generated_tokens=token_count,
+        tokens_per_second=(
+            round(token_count / (generation_ns / 1e9), 2)
+            if generation_ns > 0
+            else None
+        ),
+        load_seconds=seconds_or_none("load_duration"),
+        prompt_seconds=seconds_or_none("prompt_eval_duration"),
+        generation_seconds=seconds_or_none("eval_duration"),
+        prompt_tokens=prompt_tokens,
+    )
+    logger.info(json.dumps({
+        "event": "inference_completed",
+        "request_id": request.state.request_id,
+        "model": OLLAMA_MODEL,
+        **metrics.model_dump(),
+    }))
     return InvestigationResponse(
-        request_id=str(uuid4()),
+        request_id=request.state.request_id,
         model=OLLAMA_MODEL,
         analysis=result["response"],
-        metrics=InferenceMetrics(
-            total_seconds=round(total_ns / 1e9, 3),
-            generated_tokens=token_count,
-            tokens_per_second=(
-                round(token_count / (generation_ns / 1e9), 2)
-                if generation_ns > 0
-                else None
-            ),
-        ),
+        metrics=metrics,
     )
