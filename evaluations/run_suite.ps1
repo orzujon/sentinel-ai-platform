@@ -21,6 +21,7 @@ foreach ($case in $dataset.cases) {
         actual_source = ""
         retrieval_passed = $false
         completion_reason = $null
+        generation_status = $null
         response_check_status = $null
         warnings = @()
         request_id = $null
@@ -40,6 +41,7 @@ foreach ($case in $dataset.cases) {
         $record.actual_source = $actual
         $record.retrieval_passed = ($actual -eq $expected)
         $record.completion_reason = $result.completion_reason
+        $record.generation_status = $result.generation_status
         $record.response_check_status = $result.response_checks.status
         $record.warnings = @($result.response_checks.warnings)
         $record.request_id = $result.request_id
@@ -66,11 +68,14 @@ $report = [ordered]@{
 $report | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $outPath -Encoding utf8
 
 $records |
-    Select-Object case_id, expected_source, actual_source, retrieval_passed, completion_reason, response_check_status |
+    Select-Object case_id, expected_source, actual_source, retrieval_passed, generation_status, response_check_status |
     Format-Table -AutoSize
 
 $passed = @($records | Where-Object { $_.retrieval_passed -and -not $_.error }).Count
 Write-Host "Retrieval accuracy on these $($records.Count) labelled cases: $passed/$($records.Count)"
+$abstained = @($records | Where-Object { $_.generation_status -eq "abstained" }).Count
+$generated = @($records | Where-Object { $_.generation_status -eq "generated" }).Count
+Write-Host "Model-generated answers: $generated; deterministic abstentions: $abstained"
 Write-Host "Report saved locally: $outPath"
 Write-Host "IMPORTANT: Inspect each analysis against its manual_review_guide. Formal checks DO NOT validate factual correctness."
 if ($passed -ne $records.Count) {
