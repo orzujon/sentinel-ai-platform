@@ -74,12 +74,16 @@ $r = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/investigate" -Method Post
 $r.retrieval_status
 $r.sources | Format-Table id, title, score
 $r.analysis
+$r.completion_reason
+$r.response_checks | Format-List
 $r.metrics | Format-List
 ```
 
 * A matching incident should return `retrieval_status: matched` with `RB-K8S-001`.
 * If nothing relevant matches, `sources` is empty and `retrieval_status` is `no_match`. The model may still make unsupported claims; human review is required.
 * Source metadata comes from deterministic application retrieval, **not** the model's claims. Model-produced bracket citations are not yet independently verified.
+* `response_checks` flags mechanical errors (missing/unknown citations, section formatting, too many hypothesis bullets, and incomplete generation). Even when `status=formal_checks_passed`, **`human_review_required=true`**: it does not detect hallucinations or prove root-cause correctness.
+* Evaluations: [First RAG response](evaluations/2026-10-24-first-rag-assessment.md) and [second RAG response](evaluations/2026-10-24-second-rag-assessment.md).
 * The three-file keyword retriever is not a vector database, a robust abstention classifier or a complete prompt-injection defence.
 
 ## Tests
