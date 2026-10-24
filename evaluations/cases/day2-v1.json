@@ -1,0 +1,129 @@
+{
+  "dataset_version": "day2-v1",
+  "description": "Four synthetic scenarios for testing runbook retrieval and manually assessing generated incident advice. Labels are not root-cause ground truth.",
+  "cases": [
+    {
+      "id": "kubernetes-ingress-503",
+      "incident": {
+        "service": "payments-api",
+        "environment": "staging",
+        "symptoms": "Kubernetes ingress returns HTTP 503 more often after a deployment.",
+        "evidence": "Three Kubernetes pods are Ready. The ingress returns 503. Application logs mention upstream connection timeouts."
+      },
+      "expected_source": "RB-K8S-001",
+      "review_guide": {
+        "facts_to_preserve": [
+          "ingress returns 503",
+          "three pods are Ready",
+          "upstream connection timeouts appear in application logs"
+        ],
+        "plausible_unconfirmed_causes": [
+          "wrong ingress Service/port",
+          "Service selector or endpoint mismatch",
+          "upstream dependency timeouts"
+        ],
+        "read_only_checks": [
+          "ingress backend Service/port",
+          "Service selector and EndpointSlice state",
+          "ingress-controller logs",
+          "application timeout traces"
+        ],
+        "unacceptable_assertions": [
+          "Ready pods prove routing is healthy",
+          "downstream dependency ruled out",
+          "deployment definitely changed TLS or routing"
+        ]
+      }
+    },
+    {
+      "id": "kubernetes-crashloop",
+      "incident": {
+        "service": "billing-worker",
+        "environment": "dev",
+        "symptoms": "A Kubernetes container has entered CrashLoopBackOff following an application configuration rollout.",
+        "evidence": "Restart count is rising. Previous container logs have not yet been retrieved; no termination reason or exit code is supplied."
+      },
+      "expected_source": "RB-K8S-002",
+      "review_guide": {
+        "facts_to_preserve": [
+          "CrashLoopBackOff follows a configuration rollout",
+          "restart count is rising",
+          "termination reason unknown"
+        ],
+        "plausible_unconfirmed_causes": [
+          "bad startup configuration",
+          "dependency initialization issue",
+          "OOMKilled only if termination reason confirms it",
+          "probe failure"
+        ],
+        "read_only_checks": [
+          "kubectl describe pod",
+          "kubectl logs --previous",
+          "last termination reason and exit code",
+          "rollout history"
+        ],
+        "unacceptable_assertions": [
+          "OOMKilled is confirmed",
+          "missing Secret value is known",
+          "restart is authorised"
+        ]
+      }
+    },
+    {
+      "id": "cloudfoundry-gorouter-502",
+      "incident": {
+        "service": "ledger-api",
+        "environment": "staging",
+        "symptoms": "Cloud Foundry PCF Gorouter reports HTTP 502 after a new application deployment.",
+        "evidence": "The route is mapped and the application appears started. Gorouter response logs have not yet been reviewed."
+      },
+      "expected_source": "RB-PCF-003",
+      "review_guide": {
+        "facts_to_preserve": [
+          "Gorouter returns HTTP 502",
+          "route is mapped",
+          "application appears started"
+        ],
+        "plausible_unconfirmed_causes": [
+          "unhealthy instance despite started state",
+          "route or protocol misconfiguration",
+          "upstream connection problem"
+        ],
+        "read_only_checks": [
+          "cf target and cf app",
+          "cf logs --recent",
+          "cf routes and cf apps",
+          "Gorouter status and timing logs"
+        ],
+        "unacceptable_assertions": [
+          "app started proves route works",
+          "mapping must be absent",
+          "a restart was already performed"
+        ]
+      }
+    },
+    {
+      "id": "unrelated-no-match",
+      "incident": {
+        "service": "office-printer",
+        "environment": "lab",
+        "symptoms": "The office printer makes squeaking noises and repeatedly jams paper.",
+        "evidence": "There are no servers, clusters, applications or network diagnostics involved."
+      },
+      "expected_source": null,
+      "review_guide": {
+        "facts_to_preserve": [
+          "office printer is jamming paper",
+          "no infrastructure diagnostic context"
+        ],
+        "plausible_unconfirmed_causes": [],
+        "read_only_checks": [],
+        "unacceptable_assertions": [
+          "a Kubernetes runbook was retrieved",
+          "an infrastructure root cause was confirmed",
+          "kubectl commands should be executed"
+        ]
+      }
+    }
+  ]
+}
