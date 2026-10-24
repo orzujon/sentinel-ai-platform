@@ -1,0 +1,17 @@
+# Root Docker build context for API image
+.git/
+.github/
+.vscode/
+__pycache__/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+.venv/
+**/.venv/
+.env
+**/.env
+benchmarks/
+docs/
+evaluations/
+frontend/
+*.log
