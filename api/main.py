@@ -16,9 +16,10 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Literal
 
+from api.quality import check_response
 from api.retrieval import load_runbooks, search_runbooks
 
-app = FastAPI(title="Sentinel AI Platform", version="0.6.0")
+app = FastAPI(title="Sentinel AI Platform", version="0.7.0")
 
 # JSON logs go to container stdout. Deliberately omit request bodies, prompts,
 # response text, query parameters and incoming identity/credential headers.
@@ -167,6 +168,12 @@ class RunbookSource(BaseModel):
     excerpt: str
 
 
+class ResponseCheckSummary(BaseModel):
+    status: Literal["formal_checks_passed", "needs_attention"]
+    warnings: list[str]
+    human_review_required: bool = True
+
+
 class InvestigationResponse(BaseModel):
     request_id: str
     model: str
@@ -178,6 +185,7 @@ class InvestigationResponse(BaseModel):
     # None indicates it did not provide a completion reason.
     completion_reason: str | None = None
     output_truncated: bool | None = None
+    response_checks: ResponseCheckSummary
     advisory_only: bool = True
 
 
@@ -346,11 +354,18 @@ async def investigate(
     else:
         truncated = completion_reason == "length"
 
+    checks = check_response(
+        result["response"],
+        source_ids=[source.id for source in sources],
+        completion_reason=completion_reason,
+    )
     logger.info(json.dumps({
         "event": "inference_completion",
         "request_id": request.state.request_id,
         "completion_reason": completion_reason,
         "output_truncated": truncated,
+        "response_check_status": checks.status,
+        "response_check_warnings": checks.warnings,
     }))
     return InvestigationResponse(
         request_id=request.state.request_id,
@@ -361,4 +376,5 @@ async def investigate(
         retrieval_status="matched" if matches else "no_match",
         completion_reason=completion_reason,
         output_truncated=truncated,
+        response_checks=ResponseCheckSummary(**vars(checks)),
     )
