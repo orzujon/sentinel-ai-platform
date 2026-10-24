@@ -12,11 +12,13 @@ import time
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Literal
 
-app = FastAPI(title="Sentinel AI Platform", version="0.3.0")
+from api.retrieval import search_runbooks
+
+app = FastAPI(title="Sentinel AI Platform", version="0.4.0")
 
 # JSON logs go to container stdout. Deliberately omit request bodies, prompts,
 # response text, query parameters and incoming identity/credential headers.
@@ -150,6 +152,45 @@ async def readyz() -> dict[str, str]:
             detail="Configured inference model is not installed",
         )
     return {"status": "ready", "inference": "ollama", "model": OLLAMA_MODEL}
+
+
+
+class RunbookSource(BaseModel):
+    id: str
+    title: str
+    path: str
+    score: float
+    excerpt: str
+
+
+class RunbookSearchResponse(BaseModel):
+    count: int
+    sources: list[RunbookSource]
+
+
+@app.get("/api/runbooks/search", response_model=RunbookSearchResponse, tags=["runbooks"])
+async def runbook_search(
+    request: Request,
+    query: str = Query(min_length=4, max_length=400),
+    top_k: int = Query(default=2, ge=1, le=3),
+) -> RunbookSearchResponse:
+    """Search curated synthetic runbooks; no model inference is performed."""
+    try:
+        matches = search_runbooks(query, top_k=top_k)
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503, detail="Curated runbook library is unavailable"
+        ) from exc
+    logger.info(json.dumps({
+        "event": "runbook_retrieval",
+        "request_id": request.state.request_id,
+        "source_ids": [match.id for match in matches],
+        "count": len(matches),
+    }))
+    return RunbookSearchResponse(
+        count=len(matches),
+        sources=[RunbookSource(**vars(match)) for match in matches],
+    )
 
 
 @app.post("/api/investigate", response_model=InvestigationResponse, tags=["incidents"])
