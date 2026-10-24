@@ -86,6 +86,38 @@ $r.metrics | Format-List
 * Evaluations: [First RAG response](evaluations/2026-10-24-first-rag-assessment.md) and [second RAG response](evaluations/2026-10-24-second-rag-assessment.md).
 * The three-file keyword retriever is not a vector database, a robust abstention classifier or a complete prompt-injection defence.
 
+## Day 2 labelled evaluation suite
+
+The [four synthetic cases](evaluations/cases/day2-v1.json) cover ingress
+503, Kubernetes CrashLoopBackOff, Cloud Foundry Gorouter 502, and an unrelated
+printer issue that must retrieve no source.
+
+**Live test on Windows PowerShell** (requires the local Compose API to be up):
+
+```powershell
+.\evaluations\run_suite.ps1
+```
+
+The runner calls `/api/investigate` for each case, prints retrieval match
+results, records completion and mechanical response warnings, and writes
+a timestamped JSON report under `evaluations/reports/` (gitignored).
+All cases are synthetic. The report may contain complete generated answers;
+keep it private unless reviewed.
+
+**Two separate questions are evaluated:**
+
+1. Automated, objective: Was the expected source selected? Did generation
+   finish and did basic output-format checks pass?
+2. Human-reviewed, subjective: Did the response accurately preserve facts,
+   make calibrated hypotheses, propose relevant safe checks and avoid
+   invented causes, commands or source interpretations?
+
+`api/tests/test_dataset.py` checks top-1 retrieval offline in GitHub
+Actions. Neither successful CI nor `formal_checks_passed` means the model
+correctly diagnosed an incident.
+
+See [Day 2 evaluation rubric](evaluations/README.md) for manual review.
+
 ## Tests
 
 ```powershell
