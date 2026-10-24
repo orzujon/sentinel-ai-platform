@@ -20,7 +20,7 @@ PowerShell / HTTP client (localhost:8000)
            NVIDIA GPU
 ```
 
-`/api/investigate` currently calls Ollama directly; **retrieval is not yet injected into its prompt**. Joining retrieval with model generation and evaluating citations are Day 2 next steps.
+`/api/investigate` now selects the **single top runbook**, adds its bounded Markdown content to the inference prompt and returns backend-generated `sources` plus `retrieval_status`. Retrieved does **not** mean the generated diagnosis is correct or any model-produced citation has been verified.
 
 ## Verified on the local lab (2026-10-24)
 
@@ -60,6 +60,28 @@ Curated runbooks:
 - [RB-K8S-002 — Kubernetes CrashLoopBackOff](knowledge/runbooks/kubernetes-crashloop.md)
 - [RB-PCF-003 — Cloud Foundry Gorouter errors](knowledge/runbooks/cloudfoundry-router-502.md)
 
+## RAG investigation (Day 2, second stage)
+
+```powershell
+$incident = @{
+    service = "payments-api"
+    environment = "staging"
+    symptoms = "HTTP 503 errors increased after a deployment."
+    evidence = "Three Kubernetes pods are Ready. Ingress returns 503. Application logs show upstream connection timeouts."
+} | ConvertTo-Json
+
+$r = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/investigate" -Method Post -ContentType "application/json" -Body $incident
+$r.retrieval_status
+$r.sources | Format-Table id, title, score
+$r.analysis
+$r.metrics | Format-List
+```
+
+* A matching incident should return `retrieval_status: matched` with `RB-K8S-001`.
+* If nothing relevant matches, `sources` is empty and `retrieval_status` is `no_match`. The model may still make unsupported claims; human review is required.
+* Source metadata comes from deterministic application retrieval, **not** the model's claims. Model-produced bracket citations are not yet independently verified.
+* The three-file keyword retriever is not a vector database, a robust abstention classifier or a complete prompt-injection defence.
+
 ## Tests
 
 ```powershell
@@ -74,7 +96,7 @@ Tests mock the inference API; most tests do not require Ollama or a GPU.
 - [x] Containerised GPU-backed inference and API
 - [x] Dependency probes, API logging, basic CI and reliability exercise
 - [x] Curated lexical runbook retrieval and regression tests
-- [ ] Inject retrieved runbooks into incident-analysis prompt with source metadata
+- [x] Inject retrieved runbooks into incident-analysis prompt with source metadata
 - [ ] Evaluate generated diagnosis against labelled synthetic cases
 - [ ] Authentication, permissions and prompt-injection threat modelling
 - [ ] Prometheus/Grafana observability, concurrency tests and Kubernetes experiments
