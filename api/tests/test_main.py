@@ -32,6 +32,7 @@ def test_health_is_independent_of_inference():
     response = client.get("/healthz")
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "sentinel-api"}
+    assert response.headers["X-Request-ID"]
 
 
 def test_ready_when_model_is_installed(monkeypatch):
@@ -79,6 +80,9 @@ def test_investigate_uses_model_and_returns_metrics(monkeypatch):
                 "total_duration": 1_250_000_000,
                 "eval_count": 100,
                 "eval_duration": 1_000_000_000,
+                "load_duration": 100_000_000,
+                "prompt_eval_duration": 150_000_000,
+                "prompt_eval_count": 27,
             },
         )
 
@@ -91,7 +95,11 @@ def test_investigate_uses_model_and_returns_metrics(monkeypatch):
     assert body["metrics"]["generated_tokens"] == 100
     assert body["metrics"]["tokens_per_second"] == 100.0
     assert body["metrics"]["total_seconds"] == 1.25
-    assert body["request_id"]
+    assert body["metrics"]["load_seconds"] == 0.1
+    assert body["metrics"]["prompt_seconds"] == 0.15
+    assert body["metrics"]["generation_seconds"] == 1.0
+    assert body["metrics"]["prompt_tokens"] == 27
+    assert body["request_id"] == response.headers["X-Request-ID"]
 
 
 @pytest.mark.parametrize(
