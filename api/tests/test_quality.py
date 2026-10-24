@@ -91,3 +91,17 @@ def test_unsupported_change_claim_requires_human_review():
     )
     assert result.status == "formal_checks_passed"
     assert result.human_review_required is True
+
+
+def test_extra_heading_does_not_hide_excess_hypotheses():
+    """Regression from four-case 2026-10-24 live CrashLoop evaluation."""
+    text = BASE.replace(
+        "* UNCONFIRMED: Downstream service timeout.",
+        "* UNCONFIRMED: Downstream service timeout.\n"
+        "* UNCONFIRMED: Bad configuration.",
+    ) + "\n**Safety Boundary:**\n* Do not restart resources.\n"
+    result = check_response(
+        text, source_ids=["RB-K8S-001"], completion_reason="stop"
+    )
+    assert "invalid_section_structure" in result.warnings
+    assert "too_many_hypotheses" in result.warnings
