@@ -1,0 +1,97 @@
+---
+# Sentinel Stage 4.2: discover Ubuntu package and node configuration.
+# INTENTIONALLY READ ONLY. No become, no package cache update, no mutation.
+- name: Discover baseline prerequisites on isolated sandbox guests
+  hosts: sentinel_sandbox
+  gather_facts: true
+  any_errors_fatal: true
+  serial: 1
+  tasks:
+    - name: Require supported Ubuntu version and architecture
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] is version('26.04', '>=')
+          - ansible_facts['distribution_major_version'] == '26'
+          - ansible_facts['architecture'] == 'x86_64'
+          - ansible_facts['service_mgr'] == 'systemd'
+        fail_msg: "Unsupported guest OS, architecture or init system; no baseline changes allowed"
+
+    - name: Detect an existing Kubernetes node configuration
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /etc/kubernetes/admin.conf
+        - /var/lib/kubelet/config.yaml
+      register: sentinel_kubernetes_files
+
+    - name: Block modifying already bootstrapped Kubernetes nodes
+      ansible.builtin.assert:
+        that:
+          - not (sentinel_kubernetes_files.results | map(attribute='stat.exists') | select | list)
+        fail_msg: "Existing Kubernetes configuration found; never auto-reconfigure an established node"
+
+    - name: Inspect available Ubuntu package version of containerd
+      ansible.builtin.command:
+        argv: [apt-cache, policy, containerd]
+      register: sentinel_containerd_policy
+      changed_when: false
+
+    - name: Require an installable containerd package candidate
+      ansible.builtin.assert:
+        that:
+          - "'Candidate:' in sentinel_containerd_policy.stdout"
+          - "'Candidate: (none)' not in sentinel_containerd_policy.stdout"
+        fail_msg: "No containerd package candidate in current apt metadata; review repository configuration"
+
+    - name: Inspect currently installed containerd package
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Version}", containerd]
+      register: sentinel_installed
+      changed_when: false
+      failed_when: false
+
+    - name: Inspect existing runtime configuration
+      ansible.builtin.stat:
+        path: /etc/containerd/config.toml
+        follow: false
+      register: sentinel_runtime_config
+
+    - name: Inspect swap configuration without disabling it
+      ansible.builtin.command:
+        argv: [cat, /proc/swaps]
+      register: sentinel_swaps
+      changed_when: false
+
+    - name: Inspect current IP forwarding
+      ansible.builtin.command:
+        argv: [sysctl, -n, net.ipv4.ip_forward]
+      register: sentinel_forwarding
+      changed_when: false
+
+    - name: Inspect active runtime service without starting it
+      ansible.builtin.command:
+        argv: [systemctl, is-active, containerd]
+      register: sentinel_runtime_service
+      changed_when: false
+      failed_when: false
+
+    - name: Inspect kernel version
+      ansible.builtin.command:
+        argv: [uname, -r]
+      register: sentinel_kernel
+      changed_when: false
+
+    - name: Report read-only baseline discovery summary
+      ansible.builtin.debug:
+        msg:
+          - "Guest architecture and OS verified"
+          - "Kernel={{ sentinel_kernel.stdout }}"
+          - "Package candidate={{ sentinel_containerd_policy.stdout_lines | select('match', '^\\s+Candidate:') | list | first | default('not found') | trim }}"
+          - "Installed containerd={{ sentinel_installed.stdout if sentinel_installed.rc == 0 else 'not installed' }}"
+          - "Existing config.toml={{ sentinel_runtime_config.stat.exists }}"
+          - "containerd service={{ sentinel_runtime_service.stdout | default('unknown') }}"
+          - "Swap entries={{ (sentinel_swaps.stdout_lines | length) - 1 }}"
+          - "IPv4 forwarding={{ sentinel_forwarding.stdout }}"
+          - "RESULT=DISCOVERY_ONLY; no changes performed"
