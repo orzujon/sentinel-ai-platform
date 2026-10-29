@@ -84,7 +84,7 @@ def parse_apt_candidate(policy: str) -> str | None:
     """Interpret the actual apt-cache policy text, never a Jinja fallback."""
     if not isinstance(policy, str) or len(policy) > 120_000:
         return None
-    matches = re.findall(r"(?m)^\\s*Candidate:\\s*(\\S+)\\s*$", policy)
+    matches = re.findall(r"(?m)^\s*Candidate:\s*(\S+)\s*$", policy)
     if len(matches) != 1:
         return None
     version = matches[0]
