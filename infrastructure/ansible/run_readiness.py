@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from render_inventory import build_inventory, save_private_inventory
 from render_inventory import parse_yaml, read_pinned_config, validate
 
