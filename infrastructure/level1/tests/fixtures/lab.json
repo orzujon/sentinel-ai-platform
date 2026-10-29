@@ -1,0 +1,43 @@
+{
+  "lab": "sentinel-l1-sandbox",
+  "mode": "isolated-sandbox",
+  "network": {
+    "switch": "Sentinel-L1",
+    "type": "Internal",
+    "subnet": "10.78.0.0/24",
+    "hostIP": "10.78.0.1"
+  },
+  "paths": {
+    "vmRoot": "C:\\Sentinel\\Level1-Sandbox\\VMs",
+    "imageCache": "C:\\Sentinel\\ImageCache"
+  },
+  "protection": {
+    "vmNames": [
+      "k8s-cp01",
+      "k8s-w01"
+    ],
+    "switchNames": [
+      "Sentinel-K8s",
+      "Default Switch"
+    ],
+    "subnets": [
+      "10.77.0.0/24"
+    ]
+  },
+  "vms": [
+    {
+      "name": "sentinel-l1-cp01",
+      "staticIP": "10.78.0.10",
+      "virtualProcessors": 2,
+      "memoryStartupGB": 4,
+      "diskGB": 60
+    },
+    {
+      "name": "sentinel-l1-w01",
+      "staticIP": "10.78.0.11",
+      "virtualProcessors": 2,
+      "memoryStartupGB": 4,
+      "diskGB": 60
+    }
+  ]
+}
