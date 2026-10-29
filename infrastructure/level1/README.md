@@ -1,8 +1,10 @@
+> This public README uses fictional example inventory. Run actual infrastructure operations only with separately approved private configuration and validated resource safeguards. The currently imported legacy PowerShell modules still contain environment-specific constants and are being reviewed for extraction.
+
 # Sentinel — Level 1 Infrastructure Provisioning Pipeline
 
 **Status:** Stages 1–3 (preflight, approved image cache, isolated Hyper-V VM provisioning and authenticated guest health) implemented and previously exercised in the local lab. Stage 4 Ansible and subsequent Kubernetes automation are **not implemented**. The repository import has not yet been end-to-end revalidated from this new path.
 
-This includes read-only checks and separately approved provisioning toward an automated Hyper-V → Ubuntu → Ansible → kubeadm → Flannel → Kubernetes provisioning pipeline. It uses a new, isolated sandbox namespace and **never touches your existing** `k8s-cp01`, `k8s-w01`, `Sentinel-K8s` switch or `10.77.0.0/24` private network.
+This includes read-only checks and separately approved provisioning toward an automated Hyper-V → Ubuntu → Ansible → kubeadm → Flannel → Kubernetes provisioning pipeline. It uses a new, isolated sandbox namespace and **never touches your existing** `example-existing-cp`, `example-existing-worker`, `Example-Existing` switch or `198.51.100.0/24` private network.
 
 ## Files
 
@@ -29,7 +31,7 @@ infrastructure/level1/
 Use your existing reviewed local runtime directory with an approved local `config/lab.json`. **Windows PowerShell Administrator** is required for Hyper-V operations:
 
 ```powershell
-cd C:\Sentinel\Automation\Level1
+cd C:\ExampleLab\Automation
 .\tests\Test-StaticSafety.ps1    # offline checks use synthetic test fixture
 .\sentinel.ps1 preflight          # READ-ONLY: no VM or network changes
 .\sentinel.ps1 runs               # show stored runs
@@ -43,12 +45,12 @@ The preflight returns exit code **2** on a blocker and **0** if ready (possibly 
 
 ## Lab defaults — safe separation
 
-- Future sandbox VM names: `sentinel-l1-cp01`, `sentinel-l1-w01`.
-- Future internal switch: `Sentinel-L1`.
-- Future subnet: `10.78.0.0/24` (host `.1`, nodes `.10`, `.11`).
+- Future sandbox VM names: `example-cp`, `example-worker`.
+- Future internal switch: `Example-Isolated`.
+- Future subnet: `192.0.2.0/24` (host `.1`, nodes `.10`, `.11`).
 - VM budgets: 4 GiB startup each, 2 vCPU each, 60 GiB dynamic VHDX capacity each.
-- Planned VM storage: `C:\Sentinel\Level1-Sandbox\VMs` (not your existing VM directory).
-- Original Kubernetes remains at `10.77.0.0/24` (`k8s-cp01` and `k8s-w01`).
+- Planned VM storage: `C:\ExampleLab\VMs` (not your existing VM directory).
+- Original Kubernetes remains at `198.51.100.0/24` (`example-existing-cp` and `example-existing-worker`).
 
 Real environment configuration must remain outside public Git. Stage 2 requires an explicitly approved, SHA256-pinned Ubuntu image. The future private YAML loader is a separate read-only tool (`infrastructure/config/plan.py`) and does **not** yet connect to `sentinel.ps1`.
 
