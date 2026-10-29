@@ -1,4 +1,4 @@
-"""Guardrails for Stage 4.2 discovery: no guest or host mutation."""
+"""Guardrails for Stage 4.2: read-only guests, private controller reporting."""
 import pathlib
 import unittest
 
@@ -14,6 +14,7 @@ ALLOWED_READ_ONLY = {
     "ansible.builtin.command",
     "ansible.builtin.debug",
     "ansible.builtin.stat",
+    "ansible.builtin.copy",  # Only explicitly delegated to localhost.
 }
 
 READ_COMMANDS = {"apt-cache", "dpkg-query", "cat", "sysctl", "systemctl", "uname"}
@@ -34,6 +35,12 @@ class BaselineDiscoveryContract(unittest.TestCase):
             module = next(key for key in task if key.startswith("ansible.builtin."))
             self.assertIn(module, ALLOWED_READ_ONLY, task["name"])
             self.assertNotIn("become", task)
+            if module == "ansible.builtin.copy":
+                self.assertEqual(task.get("delegate_to"), "localhost")
+                self.assertIs(task.get("no_log"), True)
+                self.assertIs(task.get("become"), False)
+                self.assertEqual(task[module].get("mode"), "0600")
+                self.assertIn("sentinel_report_root", task[module]["dest"])
             if module == "ansible.builtin.command":
                 self.assertIs(task["changed_when"], False)
                 argv = task[module]["argv"]
@@ -52,7 +59,8 @@ class BaselineDiscoveryContract(unittest.TestCase):
         self.assertIn("Candidate:", content)
         self.assertNotIn("ansible.builtin.apt:", content)
         self.assertNotIn("ansible.builtin.service:", content)
-        self.assertNotIn("ansible.builtin.copy:", content)
+        self.assertEqual(content.count("ansible.builtin.copy:"), 1)
+        self.assertIn("delegate_to: localhost", content)
         self.assertNotIn("ansible.builtin.shell:", content)
 
     def test_controller_requires_opt_in_discovery(self):
@@ -61,6 +69,9 @@ class BaselineDiscoveryContract(unittest.TestCase):
         self.assertIn("--discover-baseline", python)
         self.assertIn("args.discover_baseline", python)
         self.assertIn("STAGE42_DISCOVERED", python)
+        self.assertIn("SENTINEL BASELINE DISCOVERY", python)
+        self.assertIn("report_dir", python)
+        self.assertIn("json.loads", python)
         self.assertIn("[switch]$DiscoverBaseline", powershell)
         self.assertIn("$DiscoverBaseline.IsPresent", powershell)
         self.assertNotIn("Start-VM", powershell)
