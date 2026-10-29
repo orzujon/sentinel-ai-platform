@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import yaml
 import os
+import shlex
 from pathlib import Path
 import sys
 
@@ -16,20 +17,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "config"))
 from plan import ConfigError, parse_yaml, read_pinned_config, validate  # noqa: E402
 
 
-def build_inventory(validated_spec: dict) -> dict:
+def build_inventory(validated_spec: dict, *, known_hosts_file: Path | None = None) -> dict:
     """Build Ansible data using *only* the schema-validated private config."""
     grouped = {"control-plane": {}, "worker": {}}
     for machine in validated_spec["vms"]:
         hostname = machine["name"]
         group = machine["role"]
+        ssh_args = (
+            "-o BatchMode=yes -o PasswordAuthentication=no "
+            "-o KbdInteractiveAuthentication=no -o StrictHostKeyChecking=yes "
+            "-o UpdateHostKeys=no"
+        )
+        if known_hosts_file is not None:
+            ssh_args += (
+                " -o UserKnownHostsFile=" + shlex.quote(str(known_hosts_file))
+                + " -o GlobalKnownHostsFile=/dev/null"
+            )
         grouped[group][hostname] = {
             "ansible_host": machine["staticIP"],
             "ansible_user": validated_spec["identity"]["username"],
             "ansible_connection": "ssh",
-            "ansible_ssh_common_args": (
-                "-o BatchMode=yes -o PasswordAuthentication=no "
-                "-o KbdInteractiveAuthentication=no -o StrictHostKeyChecking=yes"
-            ),
+            "ansible_ssh_common_args": ssh_args,
             "sentinel_expected_hostname": hostname,
         }
     # Native Ansible YAML inventory, not a dynamic inventory script.
@@ -47,13 +55,15 @@ def build_inventory(validated_spec: dict) -> dict:
     }
 
 
-def save_private_inventory(contents: dict, revision: str, environment: str) -> Path:
+def save_private_inventory(contents: dict, revision: str, environment: str, *, label: str = "inventory") -> Path:
     """Write only in the operator's private state directory; never in Git."""
     root = Path.home() / ".local" / "state" / "sentinel"
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     if os.name != "nt":
         os.chmod(root, 0o700)
-    path = root / f"inventory-{environment}-{revision[:12]}.yml"
+    if label not in {"inventory", "stage4"}:
+        raise ValueError("Unsupported inventory type")
+    path = root / f"{label}-{environment}-{revision[:12]}.yml"
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
