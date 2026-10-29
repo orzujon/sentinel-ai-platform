@@ -33,11 +33,23 @@ if ($revision -cnotmatch '^[0-9a-fA-F]{40}$') {
 
 function Convert-ToWslPath {
     param([Parameter(Mandatory)][string]$PathOnWindows)
-    $converted = & wsl.exe -d $Distribution -- wslpath -a -u $PathOnWindows
+    # wsl.exe forwards Windows native command arguments through Linux parsing.
+    # Bare backslashes can be consumed, e.g. C:\Folder\File -> C:FolderFile.
+    # Resolve first, then supply forward slashes to wslpath to preserve the path.
+    $absolute = (Resolve-Path -LiteralPath $PathOnWindows -ErrorAction Stop).ProviderPath
+    if ($absolute -cnotmatch '^[A-Za-z]:\\') {
+        throw 'BLOCKED: Stage 4 paths must be on a local Windows drive'
+    }
+    $portable = $absolute.Replace([char]92, [char]47)
+    $converted = & wsl.exe -d $Distribution -- wslpath -a -u $portable
     if ($LASTEXITCODE -ne 0 -or -not $converted) {
         throw 'BLOCKED: unable to convert a trusted local path for Ubuntu WSL'
     }
-    return ([string]$converted).Trim()
+    $result = ([string]$converted).Trim()
+    if (-not $result.StartsWith('/')) {
+        throw 'BLOCKED: WSL path resolution did not return an absolute path'
+    }
+    return $result
 }
 
 $configLinux = Convert-ToWslPath -PathOnWindows $ConfigRepo
