@@ -10,7 +10,7 @@ Python 3.10+ and PyYAML. Install only into a virtual environment:
 
 ```powershell
 py -m venv .venv
-.\.venv\Scripts\python.exe -m pip install "PyYAML==6.0.2"
+.\.venv\Scripts\python.exe -m pip install "PyYAML==6.0.3"
 ```
 
 ## Offline demonstration using a synthetic fixture
