@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1.0",
+  "pipeline": "sentinel-infrastructure-provisioning",
+  "owner": "Windows host management plane",
+  "executionPolicy": "fail-closed, no destructive actions without explicit approval",
+  "stages": [
+    { "id": "00-preflight", "implemented": true, "needsElevation": true, "writes": "runs/<id>/preflight.json and events.jsonl", "dependsOn": [] },
+    { "id": "10-host-bootstrap", "implemented": false, "needsElevation": true, "writes": "host feature and reboot state", "dependsOn": ["00-preflight"] },
+    { "id": "20-image-cache", "implemented": false, "needsElevation": false, "writes": "content-addressed image artifact", "dependsOn": ["10-host-bootstrap"] },
+    { "id": "30-hyperv-network", "implemented": false, "needsElevation": true, "writes": "isolated switch and host address", "dependsOn": ["20-image-cache"] },
+    { "id": "40-create-vms", "implemented": false, "needsElevation": true, "writes": "two isolated Hyper-V guests", "dependsOn": ["30-hyperv-network"] },
+    { "id": "50-cloud-init", "implemented": false, "needsElevation": false, "writes": "unique identities + node network", "dependsOn": ["40-create-vms"] },
+    { "id": "60-ansible", "implemented": false, "needsElevation": false, "writes": "Linux and container runtime configuration", "dependsOn": ["50-cloud-init"] },
+    { "id": "70-kubernetes-bootstrap", "implemented": false, "needsElevation": false, "writes": "kubeadm + Flannel + join", "dependsOn": ["60-ansible"] },
+    { "id": "80-validate", "implemented": false, "needsElevation": false, "writes": "node + DNS + networking smoke-test evidence", "dependsOn": ["70-kubernetes-bootstrap"] },
+    { "id": "90-publish", "implemented": false, "needsElevation": false, "writes": "aggregated run result", "dependsOn": ["80-validate"] }
+  ]
+}

@@ -221,3 +221,16 @@ __marimo__/
 
 # Generated local evaluation reports may contain user-submitted incident text.
 evaluations/reports/
+
+# Sentinel runtime and local environment data
+**/config/lab.json
+**/runs/
+**/backups/
+*.bak
+*.vhdx
+*.vhd
+*.img
+*.iso
+*.partial
+*.pem
+*.key
