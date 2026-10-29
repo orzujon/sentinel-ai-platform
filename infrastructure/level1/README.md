@@ -1,19 +1,22 @@
 # Sentinel — Level 1 Infrastructure Provisioning Pipeline
 
-**Status:** `00-preflight` implemented; later stages designed but **not implemented**.
+**Status:** Stages 1–3 (preflight, approved image cache, isolated Hyper-V VM provisioning and authenticated guest health) implemented and previously exercised in the local lab. Stage 4 Ansible and subsequent Kubernetes automation are **not implemented**. The repository import has not yet been end-to-end revalidated from this new path.
 
-This is a read-only, observable first stage toward an automated Hyper-V → Ubuntu → Ansible → kubeadm → Flannel → Kubernetes provisioning pipeline. It uses a new, isolated sandbox namespace and **never touches your existing** `k8s-cp01`, `k8s-w01`, `Sentinel-K8s` switch or `10.77.0.0/24` private network.
+This includes read-only checks and separately approved provisioning toward an automated Hyper-V → Ubuntu → Ansible → kubeadm → Flannel → Kubernetes provisioning pipeline. It uses a new, isolated sandbox namespace and **never touches your existing** `k8s-cp01`, `k8s-w01`, `Sentinel-K8s` switch or `10.77.0.0/24` private network.
 
 ## Files
 
 ```text
-sentinel-level1/
+infrastructure/level1/
 ├── sentinel.ps1                  # Windows PowerShell entry point
 ├── config/
-│   ├── lab.json                  # Non-secret desired sandbox specifications
+│   ├── lab.json                  # Local, Git-ignored runtime configuration; never commit
 │   └── stages.json               # Stage DAG and implementation flags
 ├── src/
-│   └── Sentinel.Preflight.psm1   # Read-only checks + JSON/JSONL reporting
+│   ├── Sentinel.Preflight.psm1   # Read-only checks + JSON/JSONL reporting
+│   ├── Sentinel.Images.psm1      # Signed-source digest pinning and image cache
+│   ├── Sentinel.Infrastructure.psm1 # Hyper-V plan/apply/verify
+│   └── Sentinel.GuestHealth.psm1 # SSH and cloud-init quality gate
 ├── docs/
 │   └── ARCHITECTURE.md
 ├── tests/
@@ -23,18 +26,18 @@ sentinel-level1/
 
 ## Run Level 1 from Windows
 
-Extract into a new folder, e.g. `C:\Sentinel\Automation\Level1`. **Windows PowerShell Administrator** (not WSL):
+Use your existing reviewed local runtime directory with an approved local `config/lab.json`. **Windows PowerShell Administrator** is required for Hyper-V operations:
 
 ```powershell
 cd C:\Sentinel\Automation\Level1
-.\tests\Test-StaticSafety.ps1    # offline syntax and safety checks
+.\tests\Test-StaticSafety.ps1    # offline checks use synthetic test fixture
 .\sentinel.ps1 preflight          # READ-ONLY: no VM or network changes
 .\sentinel.ps1 runs               # show stored runs
 ```
 
 If downloaded PowerShell files are blocked by Mark-of-the-Web, inspect them and use `Unblock-File` on the files you trust rather than disabling system-wide policy.
 
-The preflight returns exit code **2** on a blocker and **0** if ready (possibly with warnings). `runs/<UTC-run-id>/preflight.json` is the machine-readable report; `events.jsonl` contains each check with its timestamp. The run directory is the ONLY write destination.
+The preflight returns exit code **2** on a blocker and **0** if ready (possibly with warnings). `runs/<UTC-run-id>/preflight.json` is the machine-readable report; `events.jsonl` contains each check with its timestamp. The read-only preflight writes only run evidence; image and provisioning operations intentionally have additional approved destinations.
 
 **What to expect on your current machine:** Windows 11 Pro, Hyper-V and two existing VMs should be observed. Whether preflight passes depends on *current* free RAM, free disk and route conflicts—it is not inferred from historic system specs. Protected existing VMs are never treated as the proposed sandbox targets.
 
@@ -47,15 +50,16 @@ The preflight returns exit code **2** on a blocker and **0** if ready (possibly 
 - Planned VM storage: `C:\Sentinel\Level1-Sandbox\VMs` (not your existing VM directory).
 - Original Kubernetes remains at `10.77.0.0/24` (`k8s-cp01` and `k8s-w01`).
 
-The configuration **must not** include any secret values. The Ubuntu image digest is intentionally unset until the future image stage verifies it. This generates a warning at preflight and will block image acquisition when implemented.
+Real environment configuration must remain outside public Git. Stage 2 requires an explicitly approved, SHA256-pinned Ubuntu image. The future private YAML loader is a separate read-only tool (`infrastructure/config/plan.py`) and does **not** yet connect to `sentinel.ps1`.
 
 ## Important scope boundaries
 
-- `sentinel.ps1` only supports `preflight` and `runs`. It does not yet support `provision`, `apply`, `build`, `destroy` or `restore`.
+- `sentinel.ps1` supports `preflight`, `runs`, `image-discover`, `prepare-images`, `verify-image`, `infra-plan`, `infra-provision`, and `infra-verify`. It does not implement Ansible, Kubernetes installation, or destructive teardown.
+- The current Hyper-V module uses intentionally hardcoded sandbox safety guards; do not weaken them during YAML migration before fresh, isolated regression tests.
 - Run reports are on the Windows host under the project folder; avoid sharing full logs from private enterprise machines.
 - No full backup or restore solution exists yet; a disposable test environment must never become the only home of important data.
 - Read architecture notes before implementing stage 10 or beyond. Provisioning stages require explicit safety controls and human approval before any Windows reboot or destructive change.
 
 ## Prerequisites
 
-PowerShell 5.1+ on Windows 11 Professional/Enterprise, elevated for feature/Hyper-V inspection. Later stages may require WSL Ubuntu and Ansible, but preflight does not install either. Requirements are based on Microsoft Hyper-V requirements: https://learn.microsoft.com/virtualization/hyper-v-on-windows/reference/hyper-v-requirements
+PowerShell 5.1+ on Windows 11 Professional/Enterprise, elevated for feature/Hyper-V inspection. Image and VM stages require WSL Ubuntu image tooling; Ansible will be introduced later. Requirements are based on Microsoft Hyper-V requirements: https://learn.microsoft.com/virtualization/hyper-v-on-windows/reference/hyper-v-requirements
