@@ -91,6 +91,11 @@ def main(argv=None) -> int:
     parser.add_argument("--environment", required=True)
     parser.add_argument("--trusted-known-hosts", required=True,
                         help="Existing, independently accepted Windows OpenSSH known_hosts via WSL path")
+    parser.add_argument(
+        "--discover-baseline",
+        action="store_true",
+        help="Run the Stage 4.2 read-only Ubuntu/containerd prerequisites inspection"
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -129,6 +134,18 @@ def main(argv=None) -> int:
                         stage="Playbook syntax check")
         checked_command(["ansible-playbook", "-i", str(inventory_path), str(playbook)],
                         stage="Read-only guest readiness")
+        if args.discover_baseline:
+            discovery = Path(__file__).resolve().parent / "playbooks" / "10-baseline-discovery.yml"
+            checked_command(
+                ["ansible-playbook", "-i", str(inventory_path), "--syntax-check",
+                 str(discovery)],
+                stage="Baseline discovery syntax check"
+            )
+            checked_command(
+                ["ansible-playbook", "-i", str(inventory_path), str(discovery)],
+                stage="Stage 4.2 baseline discovery"
+            )
+            print("STAGE42_DISCOVERED: inspected both guests; no changes performed")
         print("STAGE4_READY: all guest checks passed; no provisioning performed")
         return 0
     except (Stage4Blocked, OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
