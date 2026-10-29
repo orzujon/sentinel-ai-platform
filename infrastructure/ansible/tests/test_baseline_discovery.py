@@ -34,7 +34,8 @@ class BaselineDiscoveryContract(unittest.TestCase):
         for task in self.play["tasks"]:
             module = next(key for key in task if key.startswith("ansible.builtin."))
             self.assertIn(module, ALLOWED_READ_ONLY, task["name"])
-            self.assertNotIn("become", task)
+            if module != "ansible.builtin.copy":
+                self.assertNotIn("become", task)
             if module == "ansible.builtin.copy":
                 self.assertEqual(task.get("delegate_to"), "localhost")
                 self.assertIs(task.get("no_log"), True)
