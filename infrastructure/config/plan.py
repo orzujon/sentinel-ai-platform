@@ -18,6 +18,8 @@ from urllib.parse import urlparse
 
 import yaml
 
+from image_catalog import CatalogError, resolve_catalog
+
 API_VERSION = "infra.sentinel.dev/v1alpha1"
 # Fixed platform protections, intentionally NOT sourced from editable env YAML.
 PROTECTED_VMS = frozenset({"k8s-cp01", "k8s-w01"})
@@ -143,7 +145,7 @@ def validate(doc, environment=None):
         raise ConfigError("Unapproved WSL tooling distribution")
 
     img = require_keys(s["image"], ("distribution", "architecture", "buildId",
-                                     "sourceUrl", "expectedSha256"), label="image")
+                                     "sourceUrl", "expectedSha256"), optional=("imageRef",), label="image")
     if img["distribution"] != "Ubuntu" or img["architecture"] != "amd64":
         raise ConfigError("Unsupported source image")
     if not re.fullmatch(r"20[0-9]{6}", str(img["buildId"])):
@@ -154,6 +156,9 @@ def validate(doc, environment=None):
     if (parsed.scheme != "https" or parsed.netloc != "cloud-images.ubuntu.com"
             or parsed.path != expected_path or parsed.query or parsed.fragment):
         raise ConfigError("Image source must be the approved Canonical HTTPS release path")
+    if "imageRef" in img:
+        if not isinstance(img["imageRef"], str) or not re.fullmatch(r"^[a-z][a-z0-9.-]{1,79}$", img["imageRef"]):
+            raise ConfigError("Invalid imageRef")
     digest = img["expectedSha256"]
     if digest is not None and (not isinstance(digest, str) or not HEX_DIGEST.fullmatch(digest)):
         raise ConfigError("Image SHA256 must be null or 64 hexadecimal characters")
@@ -235,7 +240,7 @@ def validate(doc, environment=None):
     return name, s
 
 
-def build_plan(doc, revision, environment=None):
+def build_plan(doc, revision, environment=None, catalog_data=None, catalog_sha256=None):
     name, spec = validate(doc, environment)
     summary = {
         "schemaVersion": "1.0",
@@ -257,6 +262,13 @@ def build_plan(doc, revision, environment=None):
                   "Host capacity, artifact signatures, image catalog and deployment approval are not checked.",
                   "Current sentinel.ps1 still consumes local lab.json; this plan cannot be applied."],
     }
+    if catalog_data is not None:
+        try:
+            summary["imageCatalog"] = resolve_catalog(
+                catalog_data, catalog_sha256, spec["image"]
+            )
+        except CatalogError as exc:
+            raise ConfigError(str(exc)) from exc
     summary["planSha256"] = hashlib.sha256(
         json.dumps({"configuration": doc, "revision": revision}, sort_keys=True,
                    separators=(",", ":")).encode("utf-8")
@@ -271,6 +283,8 @@ def main(argv=None):
     source.add_argument("--config-repo", help="Locally authenticated, private config Git clone")
     parser.add_argument("--revision", help="Full 40-character pinned commit SHA, required with --config-repo")
     parser.add_argument("--environment", required=True, help="Environment name, e.g. lab")
+    parser.add_argument("--catalog-file", help="Approved catalog file (offline and read-only)")
+    parser.add_argument("--catalog-sha256", help="64-hex catalog digest pinned outside private env config")
     args = parser.parse_args(argv)
     try:
         if not ENV_NAME.fullmatch(args.environment):
@@ -286,7 +300,14 @@ def main(argv=None):
             from pathlib import Path
             raw = Path(args.config_file).read_text(encoding="utf-8")
             revision = "LOCAL_TEST_ONLY"
-        result = build_plan(parse_yaml(raw), revision, args.environment)
+        if bool(args.catalog_file) != bool(args.catalog_sha256):
+            raise ConfigError("Specify --catalog-file and --catalog-sha256 together")
+        catalog = None
+        if args.catalog_file:
+            from pathlib import Path
+            catalog = Path(args.catalog_file).read_bytes()
+        result = build_plan(parse_yaml(raw), revision, args.environment,
+                            catalog_data=catalog, catalog_sha256=args.catalog_sha256)
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     except (ConfigError, OSError, subprocess.TimeoutExpired) as exc:
