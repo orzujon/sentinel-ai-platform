@@ -6,10 +6,12 @@ Never trusts keys fetched from unverified remote servers and never modifies VMs.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -141,11 +143,50 @@ def main(argv=None) -> int:
                  str(discovery)],
                 stage="Baseline discovery syntax check"
             )
+            report_dir = Path(tempfile.mkdtemp(
+                prefix=f"baseline-{args.environment}-{args.revision[:12]}-",
+                dir=state,
+            ))
             checked_command(
-                ["ansible-playbook", "-i", str(inventory_path), str(discovery)],
+                ["ansible-playbook", "-i", str(inventory_path),
+                 "-e", json.dumps({"sentinel_report_root": str(report_dir)}),
+                 str(discovery)],
                 stage="Stage 4.2 baseline discovery"
             )
-            print("STAGE42_DISCOVERED: inspected both guests; no changes performed")
+            required_fields = {
+                "containerdCandidate", "containerdInstalled",
+                "runtimeConfigExists", "runtimeService",
+                "swapEntries", "ipv4Forwarding", "kernel",
+                "distribution", "distributionVersion", "architecture",
+            }
+            candidates = []
+            print("\\nSENTINEL BASELINE DISCOVERY — READ ONLY", flush=True)
+            for index, machine in enumerate(machines, start=1):
+                report_path = report_dir / f"{machine['name']}.json"
+                if not report_path.is_file() or report_path.is_symlink():
+                    raise Stage4Blocked("A required private per-node report is missing")
+                data = json.loads(report_path.read_text(encoding="utf-8"))
+                if not isinstance(data, dict) or not required_fields.issubset(data):
+                    raise Stage4Blocked("The baseline report is incomplete")
+                candidate = data["containerdCandidate"]
+                if not isinstance(candidate, str) or candidate in ("", "(none)"):
+                    raise Stage4Blocked("No usable containerd package candidate")
+                candidates.append(candidate)
+                print(
+                    f"Node {index}/{len(machines)}: "
+                    f"Ubuntu {data['distributionVersion']} | "
+                    f"containerd candidate {candidate} | "
+                    f"installed {data['containerdInstalled']} | "
+                    f"config exists {data['runtimeConfigExists']} | "
+                    f"service {data['runtimeService']} | "
+                    f"swap {data['swapEntries']} | "
+                    f"forwarding {data['ipv4Forwarding']}",
+                    flush=True,
+                )
+            if len(set(candidates)) != 1:
+                raise Stage4Blocked("Different containerd candidates found across sandbox nodes")
+            print(f"PRIVATE_REPORT: {report_dir}", flush=True)
+            print("STAGE42_DISCOVERED: all guests inspected; remote changes=0", flush=True)
         print("STAGE4_READY: all guest checks passed; no provisioning performed")
         return 0
     except (Stage4Blocked, OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
