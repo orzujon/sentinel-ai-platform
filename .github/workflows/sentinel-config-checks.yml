@@ -1,0 +1,35 @@
+name: Sentinel infrastructure configuration safety
+on:
+  pull_request:
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/sentinel-config-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  config-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install read-only YAML parser
+        run: python -m pip install 'PyYAML==6.0.2'
+      - name: Execute config safety tests
+        run: python -m unittest discover -s infrastructure/config/tests -p 'test_*.py' -v
+      - name: Execute Level 1 static package tests
+        run: python -m unittest discover -s infrastructure/level1/tests -p 'test_*.py' -v
+      - name: Demonstrate read-only sample plan
+        run: python infrastructure/config/plan.py --config-file infrastructure/config/fixtures/lab.example.yaml --environment lab
+
+  windows-static-safety:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse all Level 1 PowerShell modules and verify isolation checks
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-StaticSafety.ps1
