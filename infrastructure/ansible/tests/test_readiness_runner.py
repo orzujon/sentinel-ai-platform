@@ -21,6 +21,7 @@ class TestTrustedControllerBootstrap(unittest.TestCase):
     def test_keys_copied_from_previously_trusted_store_only(self):
         with tempfile.TemporaryDirectory() as d:
             dest = Path(d) / "pinned-known-hosts"
+            (Path(d) / "windows").touch()
             def fake_ssh(cmd, **_):
                 self.assertEqual(cmd[0:2], ["ssh-keygen", "-F"])
                 record = SAMPLE_KEY if cmd[2] == "192.0.2.10" else OTHER_KEY
