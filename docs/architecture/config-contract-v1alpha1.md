@@ -1,6 +1,8 @@
-# Proposed SentinelEnvironment YAML contract — v1alpha1
+# SentinelEnvironment YAML contract — v1alpha1
 
-**Status: design only.** Current `sentinel.ps1` still loads local `config/lab.json`; neither a YAML loader nor a secret manager is implemented. Do not pass these examples to the current provisioning commands.
+> All names, paths and IPs in this document are fictional examples (TEST-NET addressing), not copied from real lab configuration. Real values belong only in the private configuration repo.
+
+**Status: read-only YAML loader implemented; provisioning integration pending.** Current `sentinel.ps1` still loads local `config/lab.json`; a read-only YAML loader exists, but the secret manager and provisioning integration are not implemented. Do not pass these examples to the current provisioning commands.
 
 ## Repository ownership
 
@@ -24,8 +26,8 @@ spec:
   mode: isolated-sandbox
   provisioningEnabled: false  # examples are non-executable until policy approved
   host:
-    vmRoot: 'C:\Sentinel\Level1-Sandbox\VMs'
-    imageCache: 'C:\Sentinel\ImageCache'
+    vmRoot: 'C:\ExampleLab\VMs'
+    imageCache: 'C:\ExampleLab\Images'
     wslDistribution: Ubuntu-26.04
   image:
     distribution: Ubuntu
@@ -35,20 +37,20 @@ spec:
     expectedSha256: null   # MUST be a previously approved 64-hex digest before apply
   network:
     managementSwitch: Default Switch
-    privateSwitch: Sentinel-L1
+    privateSwitch: Example-Isolated
     type: Internal
-    subnet: 10.78.0.0/24
-    hostIP: 10.78.0.1
+    subnet: 192.0.2.0/24
+    hostIP: 192.0.2.1
   vms:
-    - name: sentinel-l1-cp01
+    - name: example-control-plane
       role: control-plane
-      staticIP: 10.78.0.10
+      staticIP: 192.0.2.10
       virtualProcessors: 2
       memoryGB: 4
       diskGB: 60
-    - name: sentinel-l1-w01
+    - name: example-worker
       role: worker
-      staticIP: 10.78.0.11
+      staticIP: 192.0.2.11
       virtualProcessors: 2
       memoryGB: 4
       diskGB: 60
@@ -57,11 +59,11 @@ spec:
     hostLogicalCPUReserve: 4
     diskReserveGB: 20
   protection:
-    vmNames: [k8s-cp01, k8s-w01]
-    switchNames: [Sentinel-K8s, Default Switch]
-    subnets: [10.77.0.0/24]
+    vmNames: [example-old-cp, example-old-worker]
+    switchNames: [Example-Existing, Default Switch]
+    subnets: [198.51.100.0/24]
   identity:
-    username: orzu
+    username: example-user
     sshPublicKeyRef: local-user-ed25519-pub
   secretRefs: {}  # reserve references only, never resolved values
 ```
