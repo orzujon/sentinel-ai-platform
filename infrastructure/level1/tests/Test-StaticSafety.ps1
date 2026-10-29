@@ -6,7 +6,10 @@ $root = Split-Path $PSScriptRoot -Parent
 
 $files = @(
     (Join-Path $root 'sentinel.ps1'),
-    (Join-Path $root 'src\Sentinel.Preflight.psm1')
+    (Join-Path $root 'src\Sentinel.Preflight.psm1'),
+    (Join-Path $root 'src\Sentinel.Images.psm1'),
+    (Join-Path $root 'src\Sentinel.Infrastructure.psm1'),
+    (Join-Path $root 'src\Sentinel.GuestHealth.psm1')
 )
 foreach ($path in $files) {
     $tokens = $null
@@ -18,7 +21,7 @@ foreach ($path in $files) {
     Write-Host "Syntax PASS: $path"
 }
 
-$config = Get-Content -LiteralPath (Join-Path $root 'config\lab.json') -Raw | ConvertFrom-Json
+$config = Get-Content -LiteralPath (Join-Path $root 'tests\fixtures\lab.json') -Raw | ConvertFrom-Json
 if ($config.mode -ne 'isolated-sandbox') { throw 'Sandbox isolation missing' }
 foreach ($vm in $config.vms) {
     if ($vm.name -in @($config.protection.vmNames)) { throw "VM overlaps protected list: $($vm.name)" }
