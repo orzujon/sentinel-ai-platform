@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ConfigRepo,
     [ValidatePattern('^[a-z][a-z0-9-]{0,31}$')][string]$Environment = 'lab',
     [ValidateNotNullOrEmpty()][string]$Distribution = 'Ubuntu-26.04',
-    [string]$TrustedKnownHosts = (Join-Path $HOME '.ssh\known_hosts')
+    [string]$TrustedKnownHosts = (Join-Path $HOME '.ssh\known_hosts'),
+    [switch]$DiscoverBaseline
 )
 
 Set-StrictMode -Version Latest
@@ -66,6 +67,9 @@ $wslArgs = @(
     '--environment', $Environment,
     '--trusted-known-hosts', $knownHostsLinux
 )
+if ($DiscoverBaseline.IsPresent) {
+    $wslArgs += '--discover-baseline'
+}
 & wsl.exe @wslArgs
 $exitCode = $LASTEXITCODE
 if ($exitCode -ne 0) {
