@@ -1,0 +1,54 @@
+---
+# Stage 4.1: READ-ONLY guest readiness. No become, package installation or reboot.
+# Inventory must be generated from independently validated private configuration.
+- name: Verify isolated Linux guests before configuration
+  hosts: sentinel_sandbox
+  gather_facts: false
+  any_errors_fatal: true
+  serial: 1
+  tasks:
+    - name: Confirm host identity
+      ansible.builtin.command:
+        argv: [hostname]
+      changed_when: false
+      register: sentinel_hostname
+
+    - name: Reject unexpected VM identity
+      ansible.builtin.assert:
+        that:
+          - sentinel_hostname.stdout == sentinel_expected_hostname
+        fail_msg: "Host identity mismatch; refusing to continue"
+
+    - name: Inspect cloud-init state
+      ansible.builtin.command:
+        argv: [cloud-init, status]
+      changed_when: false
+      register: sentinel_cloudinit
+
+    - name: Require completed cloud-init
+      ansible.builtin.assert:
+        that:
+          - "'status: done' in sentinel_cloudinit.stdout"
+        fail_msg: "cloud-init is not complete"
+
+    - name: Inspect guest IPv4 addresses
+      ansible.builtin.command:
+        argv: [ip, -4, -o, addr, show]
+      changed_when: false
+      register: sentinel_guest_ips
+
+    - name: Require configured inventory address
+      ansible.builtin.assert:
+        that:
+          - ansible_host in sentinel_guest_ips.stdout
+        fail_msg: "Guest IP does not match the private inventory"
+
+    - name: Check passwordless sudo without escalation
+      ansible.builtin.command:
+        argv: [sudo, -n, "true"]
+      changed_when: false
+
+    - name: Confirm Python runtime for subsequent Ansible modules
+      ansible.builtin.command:
+        argv: [python3, --version]
+      changed_when: false
