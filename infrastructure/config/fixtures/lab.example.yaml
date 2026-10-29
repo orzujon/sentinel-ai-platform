@@ -16,6 +16,7 @@ spec:
     architecture: amd64
     buildId: '20261016'
     sourceUrl: https://cloud-images.ubuntu.com/releases/26.04/release-20261016/ubuntu-26.04-server-cloudimg-amd64.img
+    imageRef: ubuntu-26.04-20261016  # illustrative logical ID, NOT approved
     expectedSha256: null
   network:
     managementSwitch: Default Switch

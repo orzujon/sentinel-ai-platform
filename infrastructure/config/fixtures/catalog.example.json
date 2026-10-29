@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "sentinel.image-catalog/v1",
+  "images": [
+    {
+      "id": "ubuntu-26.04-20261016",
+      "sourceUrl": "https://cloud-images.ubuntu.com/releases/26.04/release-20261016/ubuntu-26.04-server-cloudimg-amd64.img",
+      "buildId": "20261016",
+      "sha256": null,
+      "state": "candidate",
+      "approvedBy": null,
+      "approvedAt": null
+    }
+  ]
+}
