@@ -33,3 +33,38 @@ Use an appropriately restricted, read-only credential on a dedicated runner in f
 This demonstration accepts the approved GitHub origin URL, but **does not verify signed Git commits or provenance**, host capacities, image signatures or catalog membership. It is not a deployment authorisation. The output's `planSha256` is a deterministic summary fingerprint, **not** a signature or deployable approval token.
 
 See `docs/architecture/adr-0001-config-and-secrets.md` on the architecture proposal branch for future design.
+
+## Experimental independent image-catalog inspection
+
+The image catalog checker is **offline and non-destructive**. It checks that a
+catalog file matches a SHA256 digest provided **separately** from private YAML,
+that the requested image ID has an `approved` catalog entry, and that the
+digest, version and upstream identity agree. It does **not** validate an
+upstream OpenPGP signature or prove who approved the catalog. Thus even a
+metadata match prints `deploymentPermitted: false` and
+`artifactSignatureVerified: false`.
+
+The public `fixtures/catalog.example.json` deliberately contains a
+**candidate without a digest**, so using it as an approved catalog fails
+closed. Never copy a synthetic digest from tests into an operational catalog.
+
+An operator can inspect the candidate rejection offline:
+
+```powershell
+$catalog = "infrastructure\config\fixtures\catalog.example.json"
+$catalogPin = (Get-FileHash $catalog -Algorithm SHA256).Hash.ToLowerInvariant()
+.\.venv\Scripts\python.exe infrastructure\config\plan.py `
+  --config-file infrastructure\config\fixtures\lab.example.yaml `
+  --environment lab --catalog-file $catalog --catalog-sha256 $catalogPin
+# Expected BLOCKED: candidate is not approved
+```
+
+A production catalog approval system is a **later** milestone: signed source
+evidence, reviewer identity attestation, a separate protected catalog revision,
+immutable artifacts, and revocation handling must be implemented before
+provisioning may trust the catalog. Hashing the file locally in this demonstration
+**does not by itself constitute approval**. A moving catalog from the private
+environment configuration repository is not an independent approval source.
+
+The plan fingerprint now includes catalog pin and resolved image digest if a
+catalog is supplied. No new VM creation command or privileged runner is added.
