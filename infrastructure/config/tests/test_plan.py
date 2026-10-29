@@ -2,10 +2,12 @@
 import copy
 import importlib.util
 import pathlib
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 FILE = ROOT / "config" / "plan.py"
+sys.path.insert(0, str(FILE.parent))
 spec = importlib.util.spec_from_file_location("sentinel_config_plan", FILE)
 plan = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(plan)
