@@ -1,6 +1,6 @@
 """Stage 4 inventory contract tests, using invented hosts/TEST-NET addresses."""
 import importlib.util
-import json
+import yaml
 import os
 from pathlib import Path
 import stat
@@ -26,15 +26,13 @@ class TestInventory(unittest.TestCase):
 
     def test_inventory_group_membership(self):
         data = inventory_module.build_inventory(self.validated)
-        self.assertEqual(data["sentinel_control_plane"]["hosts"], ["example-control"])
-        self.assertEqual(data["sentinel_workers"]["hosts"], ["example-worker"])
-        self.assertEqual(set(data["_meta"]["hostvars"]), {"example-control", "example-worker"})
-        self.assertEqual(data["sentinel_sandbox"]["children"],
-                         ["sentinel_control_plane", "sentinel_workers"])
+        children = data["all"]["children"]["sentinel_sandbox"]["children"]
+        self.assertEqual(list(children["sentinel_control_plane"]["hosts"]), ["example-control"])
+        self.assertEqual(list(children["sentinel_workers"]["hosts"]), ["example-worker"])
 
     def test_inventory_has_private_ssh_safeguards_not_keys(self):
         data = inventory_module.build_inventory(self.validated)
-        serialized = json.dumps(data)
+        serialized = yaml.safe_dump(data)
         self.assertIn("StrictHostKeyChecking=yes", serialized)
         self.assertIn("PasswordAuthentication=no", serialized)
         self.assertNotIn("private_key", serialized.lower())
@@ -42,7 +40,7 @@ class TestInventory(unittest.TestCase):
 
     def test_inventory_uses_only_supplied_validated_values(self):
         data = inventory_module.build_inventory(self.validated)
-        h = data["_meta"]["hostvars"]["example-control"]
+        h = data["all"]["children"]["sentinel_sandbox"]["children"]["sentinel_control_plane"]["hosts"]["example-control"]
         self.assertEqual(h["ansible_host"], "192.0.2.10")
         self.assertEqual(h["ansible_user"], "fictional-operator")
         self.assertEqual(h["sentinel_expected_hostname"], "example-control")
