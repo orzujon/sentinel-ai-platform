@@ -80,6 +80,21 @@ def prepare_host_trust(addresses: list[str], known_hosts: Path,
     persist_immutable(destination, body)
 
 
+def parse_apt_candidate(policy: str) -> str | None:
+    """Interpret the actual apt-cache policy text, never a Jinja fallback."""
+    if not isinstance(policy, str) or len(policy) > 120_000:
+        return None
+    matches = re.findall(r"(?m)^\\s*Candidate:\\s*(\\S+)\\s*$", policy)
+    if len(matches) != 1:
+        return None
+    version = matches[0]
+    if version.lower() in {"(none)", "none"}:
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9:~+._-]{1,160}", version):
+        return None
+    return version
+
+
 def checked_command(args: list[str], *, stage: str) -> None:
     outcome = subprocess.run(args, check=False)
     if outcome.returncode:
@@ -154,13 +169,15 @@ def main(argv=None) -> int:
                 stage="Stage 4.2 baseline discovery"
             )
             required_fields = {
-                "containerdCandidate", "containerdInstalled",
+                "containerdPolicyRaw", "containerdStablePolicyRaw",
+                "aptCacheStats", "containerdInstalled",
                 "runtimeConfigExists", "runtimeService",
                 "swapEntries", "ipv4Forwarding", "kernel",
                 "distribution", "distributionVersion", "architecture",
             }
             candidates = []
-            print("\\nSENTINEL BASELINE DISCOVERY — READ ONLY", flush=True)
+            missing_candidates = 0
+            print("\nSENTINEL BASELINE DISCOVERY — READ ONLY", flush=True)
             for index, machine in enumerate(machines, start=1):
                 report_path = report_dir / f"{machine['name']}.json"
                 if not report_path.is_file() or report_path.is_symlink():
@@ -168,20 +185,29 @@ def main(argv=None) -> int:
                 data = json.loads(report_path.read_text(encoding="utf-8"))
                 if not isinstance(data, dict) or not required_fields.issubset(data):
                     raise Stage4Blocked("The baseline report is incomplete")
-                candidate = data["containerdCandidate"]
-                if not isinstance(candidate, str) or candidate in ("", "(none)"):
-                    raise Stage4Blocked("No usable containerd package candidate")
-                candidates.append(candidate)
+                candidate = parse_apt_candidate(data["containerdPolicyRaw"])
+                alternate = parse_apt_candidate(data["containerdStablePolicyRaw"])
+                if candidate is None:
+                    missing_candidates += 1
+                else:
+                    candidates.append(candidate)
                 print(
                     f"Node {index}/{len(machines)}: "
                     f"Ubuntu {data['distributionVersion']} | "
-                    f"containerd candidate {candidate} | "
+                    f"containerd candidate {candidate or 'UNAVAILABLE'} | "
+                    f"containerd-stable alternative {alternate or 'UNAVAILABLE'} | "
                     f"installed {data['containerdInstalled']} | "
                     f"config exists {data['runtimeConfigExists']} | "
                     f"service {data['runtimeService']} | "
                     f"swap {data['swapEntries']} | "
                     f"forwarding {data['ipv4Forwarding']}",
                     flush=True,
+                )
+            if missing_candidates:
+                print(f"PRIVATE_REPORT: {report_dir}", flush=True)
+                raise Stage4Blocked(
+                    "APT reports no installable containerd candidate on one or more nodes. "
+                    "Inspect local APT metadata and repository sources; do not install or refresh packages automatically."
                 )
             if len(set(candidates)) != 1:
                 raise Stage4Blocked("Different containerd candidates found across sandbox nodes")
