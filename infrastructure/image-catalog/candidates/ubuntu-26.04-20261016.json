@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "sentinel.image-candidate-evidence/v1",
+  "imageRef": "ubuntu-26.04-20261016",
+  "distribution": "Ubuntu",
+  "architecture": "amd64",
+  "buildId": "20261016",
+  "sourceUrl": "https://cloud-images.ubuntu.com/releases/26.04/release-20261016/ubuntu-26.04-server-cloudimg-amd64.img",
+  "sha256": "5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5",
+  "state": "candidate",
+  "trust": "operator-reported",
+  "observations": {
+    "cacheMetadataVerifiedAtUtc": "2026-10-28T22:41:30.3416115Z",
+    "localFileHash": "operator-confirmed-match",
+    "checksumManifest": "SHA256SUMS",
+    "signatureFile": "SHA256SUMS.gpg",
+    "verificationTool": "gpgv",
+    "signatureResult": "Good signature from UEC Image Automatic Signing Key <cdimage@ubuntu.com>",
+    "signerFingerprint": "D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81",
+    "signedChecksumMatchesLocalArtifact": "operator-confirmed-match"
+  },
+  "notYetEstablished": [
+    "Machine-generated reproducible verification attestation and stored signed evidence artifacts",
+    "An independently authenticated and immutable production catalog revision",
+    "Named approver decision, separation of duties and revocation policy",
+    "Host capacity and VM provisioning authorisation"
+  ],
+  "deploymentPermitted": false
+}
