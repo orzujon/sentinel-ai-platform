@@ -19,6 +19,43 @@ VM start/stop or reboot is performed in this increment.
    confirms hostname and configured IP, checks cloud-init and passwordless
    sudo, and checks that Python 3 is available.
 
+## Single-command controller workflow
+
+Use the new `run_readiness.py` entrypoint **inside Ubuntu WSL**, after
+switching to this PR's branch. The operator supplies an existing local private
+configuration clone, an immutable Git commit SHA, and the Windows
+`known_hosts` file mounted under `/mnt/c`:
+
+```bash
+REV=$(git -C /mnt/c/path/to/private-config rev-parse origin/main)
+python3 infrastructure/ansible/run_readiness.py \
+  --config-repo /mnt/c/path/to/private-config \
+  --revision "$REV" \
+  --environment lab \
+  --trusted-known-hosts /mnt/c/Users/EXAMPLE/.ssh/known_hosts
+```
+
+The entrypoint validates private YAML, extracts target IPs, reads *only*
+existing matching SSH keys from the supplied trust store, pins those records
+under a private WSL state path with restrictive permissions, emits a native
+Ansible inventory bound to that trust file, checks playbook syntax, and runs
+the read-only readiness playbook. Later invocations are idempotent if the
+private config and trusted key records are unchanged. A missing or changed
+trusted host key blocks the run rather than triggering automatic acceptance.
+
+**Trust prerequisite:** Windows' existing host keys must have been
+authenticated via a trusted channel when they were first accepted. This
+script cannot independently prove historical trust. This process does not
+transfer private SSH keys or bridge the Windows SSH agent: WSL must already
+have access to an authorized SSH identity. Failed SSH authentication is a
+BLOCKED result to investigate, not a reason to disable host-key checking.
+
+No VM power operations, packages or system changes are performed. Expected
+result: `TRUST_READY`, `INVENTORY_READY`, Ansible guest checks, then
+`STAGE4_READY`.
+
+## Manual troubleshooting (not the normal workflow)
+
 ## Toolchain discovery (safe to run now)
 
 Run from PowerShell:
