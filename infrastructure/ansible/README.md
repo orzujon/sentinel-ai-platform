@@ -19,6 +19,22 @@ VM start/stop or reboot is performed in this increment.
    confirms hostname and configured IP, checks cloud-init and passwordless
    sudo, and checks that Python 3 is available.
 
+## Normal use — one PowerShell command
+
+From the public platform checkout on the Windows management host, with the
+trusted private config repository cloned locally:
+
+```powershell
+.\infrastructure\ansible\Invoke-SentinelReadiness.ps1 -ConfigRepo 'C:\ExamplePrivateConfig'
+```
+
+The script resolves the current private `origin/main` to its full commit,
+converts Windows paths to WSL paths without shell interpolation, invokes
+the Ubuntu WSL controller, derives Ansible inventory from validated private
+YAML, pins existing trusted Windows SSH host keys, and runs the read-only
+playbook. No copying into a public repo and no repeated hand-crafted Bash
+commands. Real paths are supplied only at execution time.
+
 ## Single-command controller workflow
 
 Use the new `run_readiness.py` entrypoint **inside Ubuntu WSL**, after
