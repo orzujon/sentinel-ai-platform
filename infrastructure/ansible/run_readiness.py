@@ -125,7 +125,7 @@ def main(argv=None) -> int:
             )
         print(f"INVENTORY_READY: {len(machines)} validated targets", flush=True)
         playbook = Path(__file__).resolve().parent / "playbooks" / "00-readiness.yml"
-        checked_command(["ansible-playbook", "--syntax-check", str(playbook)],
+        checked_command(["ansible-playbook", "-i", str(inventory_path), "--syntax-check", str(playbook)],
                         stage="Playbook syntax check")
         checked_command(["ansible-playbook", "-i", str(inventory_path), str(playbook)],
                         stage="Read-only guest readiness")
