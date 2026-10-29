@@ -95,3 +95,42 @@
           - "Swap entries={{ (sentinel_swaps.stdout_lines | length) - 1 }}"
           - "IPv4 forwarding={{ sentinel_forwarding.stdout }}"
           - "RESULT=DISCOVERY_ONLY; no changes performed"
+
+    - name: Require an operator-private controller report directory
+      ansible.builtin.assert:
+        that:
+          - sentinel_report_root is defined
+          - sentinel_report_root is string
+          - sentinel_report_root.startswith('/home/')
+        fail_msg: "Missing WSL-private reporting directory; abort without saving environment data"
+
+    - name: Save discovery evidence only on Ansible controller
+      ansible.builtin.copy:
+        dest: "{{ sentinel_report_root }}/{{ inventory_hostname }}.json"
+        mode: '0600'
+        content: >-
+          {{
+            {
+              'containerdCandidate': (
+                sentinel_containerd_policy.stdout_lines
+                | select('match', '^\\s*Candidate:')
+                | list | first | default('Candidate: (none)')
+                | regex_replace('^\\s*Candidate:\\s*', '')
+                | trim
+              ),
+              'containerdInstalled': (
+                sentinel_installed.stdout if sentinel_installed.rc == 0 else 'not-installed'
+              ),
+              'runtimeConfigExists': sentinel_runtime_config.stat.exists,
+              'runtimeService': sentinel_runtime_service.stdout | default('unknown'),
+              'swapEntries': ((sentinel_swaps.stdout_lines | length) - 1),
+              'ipv4Forwarding': sentinel_forwarding.stdout | trim,
+              'kernel': sentinel_kernel.stdout | trim,
+              'distribution': ansible_facts['distribution'],
+              'distributionVersion': ansible_facts['distribution_version'],
+              'architecture': ansible_facts['architecture']
+            } | to_nice_json
+          }}
+      delegate_to: localhost
+      become: false
+      no_log: true
