@@ -9,14 +9,7 @@ on:
       - "evaluations/run_suite.ps1"
       - "compose.yaml"
       - ".github/workflows/api-checks.yml"
-  pull_request:
-    paths:
-      - "api/**"
-      - "knowledge/**"
-      - "evaluations/cases/**"
-      - "evaluations/run_suite.ps1"
-      - "compose.yaml"
-      - ".github/workflows/api-checks.yml"
+  pull_request:  # Test existing AI service on every PR, including infrastructure changes
   workflow_dispatch:
 
 permissions:
