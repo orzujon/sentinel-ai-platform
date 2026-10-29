@@ -63,6 +63,16 @@ class TestImageCatalog(unittest.TestCase):
         self.assertFalse(result["deploymentPermitted"])
         self.assertEqual(result["imageCatalog"]["imageSha256"], FAKE_DIGEST)
 
+    def test_plan_digest_changes_with_approved_image_digest(self):
+        raw1, pin1 = encoded(self.catalog)
+        first = planner.build_plan(self.load_config(), "a" * 40, "lab",
+                                   catalog_data=raw1, catalog_sha256=pin1)
+        self.catalog["images"][0]["sha256"] = "b" * 64
+        raw2, pin2 = encoded(self.catalog)
+        second = planner.build_plan(self.load_config(), "a" * 40, "lab",
+                                    catalog_data=raw2, catalog_sha256=pin2)
+        self.assertNotEqual(first["planSha256"], second["planSha256"])
+
     def test_reject_tampered_catalog(self):
         raw, pin = encoded(self.catalog)
         with self.assertRaises(planner.ConfigError):
