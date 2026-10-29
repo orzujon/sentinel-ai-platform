@@ -38,12 +38,19 @@
       register: sentinel_containerd_policy
       changed_when: false
 
-    - name: Require an installable containerd package candidate
-      ansible.builtin.assert:
-        that:
-          - "'Candidate:' in sentinel_containerd_policy.stdout"
-          - "'Candidate: (none)' not in sentinel_containerd_policy.stdout"
-        fail_msg: "No containerd package candidate in current apt metadata; review repository configuration"
+    # Do not infer the package version from Ansible Jinja filtering. Capture
+    # raw APT policy and have the controller parse and enforce its candidate.
+    - name: Inspect alternate Ubuntu containerd-stable package
+      ansible.builtin.command:
+        argv: [apt-cache, policy, containerd-stable]
+      register: sentinel_containerd_stable_policy
+      changed_when: false
+
+    - name: Inspect available local APT index metadata
+      ansible.builtin.command:
+        argv: [apt-cache, stats]
+      register: sentinel_apt_cache_stats
+      changed_when: false
 
     - name: Inspect currently installed containerd package
       ansible.builtin.command:
@@ -88,7 +95,7 @@
         msg:
           - "Guest architecture and OS verified"
           - "Kernel={{ sentinel_kernel.stdout }}"
-          - "Package candidate={{ sentinel_containerd_policy.stdout_lines | select('match', '^\\s+Candidate:') | list | first | default('not found') | trim }}"
+          - "APT policy collected; candidate will be verified by management controller"
           - "Installed containerd={{ sentinel_installed.stdout if sentinel_installed.rc == 0 else 'not installed' }}"
           - "Existing config.toml={{ sentinel_runtime_config.stat.exists }}"
           - "containerd service={{ sentinel_runtime_service.stdout | default('unknown') }}"
@@ -111,13 +118,9 @@
         content: >-
           {{
             {
-              'containerdCandidate': (
-                sentinel_containerd_policy.stdout_lines
-                | select('match', '^\\s*Candidate:')
-                | list | first | default('Candidate: (none)')
-                | regex_replace('^\\s*Candidate:\\s*', '')
-                | trim
-              ),
+              'containerdPolicyRaw': sentinel_containerd_policy.stdout,
+              'containerdStablePolicyRaw': sentinel_containerd_stable_policy.stdout,
+              'aptCacheStats': sentinel_apt_cache_stats.stdout,
               'containerdInstalled': (
                 sentinel_installed.stdout if sentinel_installed.rc == 0 else 'not-installed'
               ),
