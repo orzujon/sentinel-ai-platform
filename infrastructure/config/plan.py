@@ -269,9 +269,14 @@ def build_plan(doc, revision, environment=None, catalog_data=None, catalog_sha25
             )
         except CatalogError as exc:
             raise ConfigError(str(exc)) from exc
+    # Include the independently pinned image catalog in the plan fingerprint.
+    # This is only an identification digest, never a deployment approval token.
     summary["planSha256"] = hashlib.sha256(
-        json.dumps({"configuration": doc, "revision": revision}, sort_keys=True,
-                   separators=(",", ":")).encode("utf-8")
+        json.dumps({"configuration": doc, "revision": revision,
+                    "catalogPin": catalog_sha256 if catalog_data is not None else None,
+                    "resolvedImage": (summary["imageCatalog"]["imageSha256"]
+                                      if catalog_data is not None else None)},
+                   sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     return summary
 
