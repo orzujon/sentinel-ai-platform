@@ -32,7 +32,7 @@ Use an appropriately restricted, read-only credential on a dedicated runner in f
 
 This demonstration accepts the approved GitHub origin URL, but **does not verify signed Git commits or provenance**, host capacities, image signatures or catalog membership. It is not a deployment authorisation. The output's `planSha256` is a deterministic summary fingerprint, **not** a signature or deployable approval token.
 
-See `docs/architecture/adr-0001-config-and-secrets.md` on the architecture proposal branch for future design.
+See `docs/architecture/adr-0001-config-and-secrets.md` in this branch for the architecture decision.
 
 ## Experimental independent image-catalog inspection
 
@@ -68,3 +68,25 @@ environment configuration repository is not an independent approval source.
 
 The plan fingerprint now includes catalog pin and resolved image digest if a
 catalog is supplied. No new VM creation command or privileged runner is added.
+
+## First real image — verified candidate (not approved)
+
+`infrastructure/image-catalog/candidates/ubuntu-26.04-20261016.json`
+records the **operator-reported** local integrity, Canonical `gpgv` signature
+and signed manifest comparison results for Ubuntu release build `20261016`.
+The observed artifact SHA256 is
+`5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5`.
+The reported signing key fingerprint is
+`D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81`.
+
+This evidence is **not a machine-generated signed attestation**. The public
+record deliberately omits local paths, raw signed manifests, credentials
+and machine identities. It has `state: candidate` and
+`deploymentPermitted: false`. The separate catalog example is still an
+unapproved fixture. No production catalog approval has been minted.
+
+**Next security gate:** capture a reproducible verification report that
+rechecks the actual artifact against the signed manifest with a trusted
+signing key; pin a reviewed catalog revision independently of private YAML;
+record an explicit approver decision and revocation policy. Only a future,
+separately reviewed provisioning integration may consume that approval.
