@@ -44,7 +44,7 @@ class BaselineDiscoveryContract(unittest.TestCase):
         content = PLAYBOOK.read_text(encoding="utf-8")
         self.assertIn("/var/lib/kubelet/config.yaml", content)
         self.assertIn("/etc/kubernetes/admin.conf", content)
-        self.assertIn("existing Kubernetes node", content.lower().replace("existing kubernetes", "existing Kubernetes"))
+        self.assertIn("Existing Kubernetes configuration found", content)
 
     def test_package_is_inspected_not_installed(self):
         content = PLAYBOOK.read_text(encoding="utf-8")
