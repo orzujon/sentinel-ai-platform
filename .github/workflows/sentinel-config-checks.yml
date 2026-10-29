@@ -25,3 +25,11 @@ jobs:
         run: python -m unittest discover -s infrastructure/level1/tests -p 'test_*.py' -v
       - name: Demonstrate read-only sample plan
         run: python infrastructure/config/plan.py --config-file infrastructure/config/fixtures/lab.example.yaml --environment lab
+
+  windows-static-safety:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse all Level 1 PowerShell modules and verify isolation checks
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-StaticSafety.ps1
