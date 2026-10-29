@@ -37,6 +37,7 @@ def build_inventory(validated_spec: dict, *, known_hosts_file: Path | None = Non
             "ansible_host": machine["staticIP"],
             "ansible_user": validated_spec["identity"]["username"],
             "ansible_connection": "ssh",
+            "ansible_python_interpreter": "/usr/bin/python3",
             "ansible_ssh_common_args": ssh_args,
             "sentinel_expected_hostname": hostname,
         }
