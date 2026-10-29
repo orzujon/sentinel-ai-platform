@@ -1,3 +1,5 @@
+> Public documentation uses fictional sample values only. Real inventory resides in a private configuration repository.
+
 # ADR 0002 — Management runner, approved-image catalog, and public showcase
 
 - **Status:** Proposed for review — no execution changes
@@ -23,7 +25,7 @@ Admin privileges are required for specific Hyper-V operations but should not be 
 
 An approved image is a **digest-bound artifact** in a trusted catalog, not just an image URL the environment config is allowed to invent.
 
-- Today: local Stage 2 content-addressed cache (`C:\Sentinel\ImageCache`) stores approved Ubuntu binaries; preserve it. Introduce a read-only approved catalog (signed artifact metadata or repository with independently enforced protected approval). An image is **not approved solely because it exists on disk or because a config editor labels it approved**.
+- Today: local Stage 2 content-addressed cache (`C:\ExampleLab\Images`) stores approved Ubuntu binaries; preserve it. Introduce a read-only approved catalog (signed artifact metadata or repository with independently enforced protected approval). An image is **not approved solely because it exists on disk or because a config editor labels it approved**.
 - For each image, record: logical ID, vendor, version/build date, architecture/format, upstream URL, SHA256, upstream-signature validation evidence, approval date/authority, state (candidate/approved/deprecated/revoked), and published artifact location.
 - Only `approved` image digests can be resolved by `apply`; fail closed for candidate, revoked, missing or digest-mismatched artifacts. An environmental YAML value such as `imageRef: ubuntu-26.04-20261016` cannot itself grant approval.
 - Store **image consumption history** in an append-only execution audit (run ID, environment, host, VM ID, image digest, timestamp). The catalog tracks allowed images; the execution audit tracks actual usage. Do not put sensitive machine inventories into the public repo.
@@ -46,7 +48,7 @@ An approved image is a **digest-bound artifact** in a trusted catalog, not just 
 ### 5. Keep the source repository public as a portfolio
 
 - Public `sentinel-ai-platform`: modules, schemas, pipelines, docs, architecture decisions, policy tests, synthetic fixtures, sanitized `lab.example.yaml`, and published **non-sensitive** demo evidence.
-- Private `sentinel-environment-config`: real per-environment addresses, host paths, machine sizes, secret **references**, config change history. No actual secret values in Git.
+- Private `<private-config-repository>`: real per-environment addresses, host paths, machine sizes, secret **references**, config change history. No actual secret values in Git.
 - Separate protected catalog and artifact storage: approved images and immutable digests. Consider whether operational approvals should remain private; code contains its *schema*, not production image inventory.
 - Secret manager: actual secret values, identity and rotation.
 - Never rely on log redaction as permission to commit a secret. Prevent secret values entering version control in the first place, then layer secret scanning and output redaction.

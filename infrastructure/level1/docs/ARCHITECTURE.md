@@ -2,7 +2,7 @@
 
 ## Objective
 
-Build a fully reproducible *second* Kubernetes environment using disposable, isolated Hyper-V resources, without taking over or modifying the existing `k8s-cp01` and `k8s-w01` machines. The first implementation covers **preflight only**. Subsequent stages are interfaces, not completed automation.
+Build a fully reproducible *second* Kubernetes environment using disposable, isolated Hyper-V resources, without taking over or modifying the existing `example-existing-cp` and `example-existing-worker` machines. Legacy preflight, image-cache and isolated VM provisioning components exist. The public-source separation remains incomplete until all environment-specific runtime constants are migrated into private policy.
 
 ## Two planes: never create a circular dependency
 
@@ -19,12 +19,12 @@ WINDOWS 11 MANAGEMENT HOST (survives sandbox deletion)
                                                                         v
                               [90 publish] <-- [80 validate] <-- [70 kubeadm] <-- [60 Ansible]
 
-SEPARATE SANDBOX WORKLOAD PLANE (not yet created):
-  Internal switch Sentinel-L1, host 10.78.0.1/24
-  sentinel-l1-cp01: 10.78.0.10/24     sentinel-l1-w01: 10.78.0.11/24
+ILLUSTRATIVE SANDBOX WORKLOAD PLANE (fictional identifiers):
+  Internal switch Example-Isolated, host 192.0.2.1/24
+  example-cp: 192.0.2.10/24     example-worker: 192.0.2.11/24
 
 PROTECTED, EXISTING WORKLOAD PLANE (never targeted):
-  Sentinel-K8s, 10.77.0.0/24, k8s-cp01, k8s-w01
+  Example-Existing, 198.51.100.0/24, example-existing-cp, example-existing-worker
 ```
 
 The eventual **control-plane API** will live inside sandbox Kubernetes; the **provisioning pipeline** and its evidence must remain on the Windows host (and later off-host backup).
@@ -49,7 +49,7 @@ Logs do **not** contain passwords, kubeadm tokens, SSH private keys or kubeconfi
 - Storage: conservative 2 × 60 GiB planned disks + 20 GiB host free-space reserve.
 - Elevation, Hyper-V feature state and read-only Hyper-V module/host access.
 - Existing VM inventory: any collision with proposed names fails; protected `k8s-*` VMs are reported only.
-- Existing virtual switch collision and IPv4 route overlap with the new sandbox `10.78.0.0/24` subnet.
+- Existing virtual switch collision and IPv4 route overlap with the new sandbox `192.0.2.0/24` subnet.
 - Basic WSL executable availability; missing Ubuntu/Ansible installation is a later-stage check.
 - Golden image SHA256 pin presence (WARN until acquired and verified; image stage will hard-stop without it).
 

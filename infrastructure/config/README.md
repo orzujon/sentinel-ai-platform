@@ -2,7 +2,7 @@
 
 **Experimental, read-only implementation. Does not replace `infrastructure/level1/sentinel.ps1`.**
 
-The public platform repo contains the loader and policy enforcement; the separate **private** `orzujon/sentinel-environment-config` repo supplies environment YAML. Secrets are **not** fetched, and image approval is **not** implemented.
+The public platform repo contains the loader and policy enforcement; the separate **private** `example-org/example-private-config` repo supplies environment YAML. Secrets are **not** fetched, and image approval is **not** implemented.
 
 ## Dependencies
 
@@ -23,9 +23,9 @@ py -m venv .venv
 ## Inspect the private configuration repository at an immutable commit
 
 ```powershell
-git clone --no-checkout git@github.com:orzujon/sentinel-environment-config.git C:\Sentinel\config-readonly
-$revision = (git -C C:\Sentinel\config-readonly rev-parse HEAD)
-.\.venv\Scripts\python.exe infrastructure\config\plan.py --config-repo C:\Sentinel\config-readonly --revision $revision --environment lab
+git clone --no-checkout git@github.com:example-org/example-private-config.git C:\ExampleLab\config-readonly
+$revision = (git -C C:\ExampleLab\config-readonly rev-parse HEAD)
+.\.venv\Scripts\python.exe infrastructure\config\plan.py --config-repo C:\ExampleLab\config-readonly --revision $revision --environment lab
 ```
 
 Use an appropriately restricted, read-only credential on a dedicated runner in future. The current command reads an **existing local clone** via `git show` and does not perform a pull, download, checkout, apply, or secret resolution. The operator controls when the clone is refreshed. Only the explicitly pinned full commit is read.
