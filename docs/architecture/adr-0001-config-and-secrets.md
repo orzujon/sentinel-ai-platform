@@ -54,7 +54,7 @@ publish non-sensitive JSON/JSONL evidence; clean up sensitive temporary files
 - A private GitHub repo alone is not a secret manager. Secret references (e.g. `vault://sentinel/lab/example`) are not secret values. The runner refuses unsupported references or missing secret-provider integration instead of falling back to plaintext.
 - Never put resolved secrets into CLI arguments, persistent environment variables, workflow logs, Git commits, issue bodies, unencrypted build artifacts, or `runs/`. Some provisioning tools necessarily consume a temporary file; protect its file permissions, bound its lifetime, and delete it on both success and failure. Avoid writing secret material into persistent VM seed disks where possible.
 - **No privileged Hyper-V operations from untrusted PR workflows.** GitHub-hosted CI performs syntax, schema and unit tests only. Explicitly gated provisioning belongs to an isolated, permission-limited, approved local runner.
-- Use deny-by-default environment/VM identity rules and protect preexisting `k8s-cp01`, `k8s-w01` and `Sentinel-K8s` until an independently reviewed policy changes.
+- Use deny-by-default environment/VM identity rules and protect preexisting `example-existing-cp`, `example-existing-worker` and `Example-Existing` until an independently reviewed policy changes.
 - Changing a configuration file never, by itself, provisions a VM.
 
 ## Migration without breaking the verified baseline
