@@ -23,6 +23,7 @@ from render_inventory import parse_yaml, read_pinned_config, validate
 # A version change requires a reviewed source-code change, not a CLI override.
 BASELINE_CONTAINERD_VERSION = "2.2.2-0ubuntu1.2"
 APPLY_APPROVAL = "APPLY_SENTINEL_STAGE42_TO_SANDBOX"
+REBOOT_APPROVAL = "REBOOT_SENTINEL_STAGE42_SANDBOX"
 
 
 class Stage4Blocked(Exception):
@@ -131,11 +132,24 @@ def main(argv=None) -> int:
         "--approval-token", default=None,
         help="Required literal approval phrase when using --apply-baseline"
     )
+    parser.add_argument(
+        "--reboot-validate", action="store_true",
+        help="Reboot only explicitly approved sandbox guests, one at a time, verifying persistence"
+    )
+    parser.add_argument(
+        "--reboot-approval-token", default=None,
+        help="Separate approval phrase required for disruptive sandbox reboots"
+    )
     args = parser.parse_args(argv)
 
     try:
-        if args.plan_baseline and args.apply_baseline:
-            raise Stage4Blocked("Choose plan or apply, not both")
+        if sum((bool(args.plan_baseline), bool(args.apply_baseline), bool(args.reboot_validate))) > 1:
+            raise Stage4Blocked("Choose plan, apply or reboot verification, not multiple modes")
+        if args.reboot_validate:
+            if args.reboot_approval_token != REBOOT_APPROVAL:
+                raise Stage4Blocked("Explicit sandbox reboot approval is missing")
+        elif args.reboot_approval_token is not None:
+            raise Stage4Blocked("Reboot approval token only belongs to a reboot validation run")
         if args.apply_baseline:
             if args.approval_token != APPLY_APPROVAL:
                 raise Stage4Blocked("Explicit Stage 4.2 sandbox apply approval is missing")
@@ -176,7 +190,7 @@ def main(argv=None) -> int:
                         stage="Playbook syntax check")
         checked_command(["ansible-playbook", "-i", str(inventory_path), str(playbook)],
                         stage="Read-only guest readiness")
-        if args.discover_baseline or args.plan_baseline or args.apply_baseline:
+        if args.discover_baseline or args.plan_baseline or args.apply_baseline or args.reboot_validate:
             discovery = Path(__file__).resolve().parent / "playbooks" / "10-baseline-discovery.yml"
             checked_command(
                 ["ansible-playbook", "-i", str(inventory_path), "--syntax-check",
@@ -216,7 +230,7 @@ def main(argv=None) -> int:
                     missing_candidates += 1
                 else:
                     candidates.append(candidate)
-                if args.plan_baseline or args.apply_baseline:
+                if args.plan_baseline or args.apply_baseline or args.reboot_validate:
                     if candidate != BASELINE_CONTAINERD_VERSION:
                         raise Stage4Blocked("Containerd candidate differs from the reviewed version pin")
                     if data["swapEntries"] != 0:
@@ -225,6 +239,14 @@ def main(argv=None) -> int:
                         raise Stage4Blocked("Existing containerd version differs from pinned package")
                     if data["runtimeConfigExists"] and data["containerdInstalled"] == "not-installed":
                         raise Stage4Blocked("Unmanaged runtime config found before containerd installation")
+                    if args.reboot_validate:
+                        if (
+                            data["containerdInstalled"] != BASELINE_CONTAINERD_VERSION
+                            or data["runtimeConfigExists"] is not True
+                            or data["runtimeService"] != "active"
+                            or str(data["ipv4Forwarding"]) != "1"
+                        ):
+                            raise Stage4Blocked("Sandbox baseline is not fully installed; reboot not permitted")
                 print(
                     f"Node {index}/{len(machines)}: "
                     f"Ubuntu {data['distributionVersion']} | "
@@ -289,7 +311,35 @@ def main(argv=None) -> int:
                         "STAGE42_APPLIED: review Ansible recap above and rerun for "
                         "idempotence verification", flush=True
                     )
-        print("STAGE4_READY: all guest checks passed; no provisioning performed")
+            if args.reboot_validate:
+                reboot_playbook = (
+                    Path(__file__).resolve().parent
+                    / "playbooks" / "30-reboot-persistence.yml"
+                )
+                checked_command(
+                    ["ansible-playbook", "-i", str(inventory_path),
+                     "--syntax-check", str(reboot_playbook)],
+                    stage="Reboot persistence playbook syntax check"
+                )
+                print(
+                    "REBOOT_APPROVED: both validated isolated sandbox VMs will reboot "
+                    "one at a time. No original VMs are targeted.",
+                    flush=True,
+                )
+                checked_command(
+                    ["ansible-playbook", "-i", str(inventory_path),
+                     "-e", json.dumps({
+                         "sentinel_reboot_approved": True,
+                         "sentinel_reboot_version": BASELINE_CONTAINERD_VERSION,
+                     }), str(reboot_playbook)],
+                    stage="Approved Stage 4.2 reboot persistence verification"
+                )
+                print(
+                    "STAGE42_REBOOT_VERIFIED: pinned containerd service, CRI and "
+                    "networking survived reboot on all sandbox guests",
+                    flush=True,
+                )
+        print("STAGE4_READY: guest readiness checks passed; configuration changes depend on selected mode")
         return 0
     except (Stage4Blocked, OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
