@@ -70,13 +70,48 @@ It deliberately does **not** disable swap, rewrite `/etc/fstab`,
 install kubeadm/kubelet, initialize a Kubernetes cluster or modify
 Windows Hyper-V resources.
 
+## Optional reboot persistence verification (separate approval)
+
+After the first approved install and a second convergent run showing
+`changed=0`, the following **disruptive** test can verify that systemd,
+CRI and the network settings recover after a restart. It will reboot the
+two approved sandbox guests one after the other, not the Windows host or
+pre-existing protected VMs:
+
+```powershell
+.\infrastructure\ansible\Invoke-SentinelReadiness.ps1 `
+    -ConfigRepo 'C:\PRIVATE-CONFIG-CLONE' `
+    -RebootValidate `
+    -RebootApprovalToken 'REBOOT_SENTINEL_STAGE42_SANDBOX'
+```
+
+This option is not run by default, by `-PlanBaseline`, or by
+`-ApplyBaseline`. The controller first validates the pinned environment,
+trusted SSH host keys and guest readiness. Stage 4.2 discovery then
+confirms both guests have the approved package version, an existing
+containerd config, an active service, zero swap and IPv4 forwarding enabled.
+The dedicated playbook performs **all-host read-only preflight** before
+starting any reboot. If a guest has an unexpected Kubernetes installation,
+an unrecognised containerd configuration or mismatched package, both
+reboots are blocked.
+
+When explicitly approved, Ansible's reboot module restarts each guest,
+waits for SSH to reconnect, then checks that containerd remains installed,
+enabled and active; the CRI plugin is present; `overlay` and
+`br_netfilter` are loaded; and forwarding/sysctl settings persist.
+One planned reboot counts as a legitimate changed task.
+
+This test causes an expected availability interruption to the sandbox guests.
+If reconnect or validation fails, stop, inspect the last host, and do not
+assume automatic rollback.
+
 ## Acceptance and rerun contract
 
 - First approved run: both sandbox VMs report `failed=0`,
   `unreachable=0`, with expected configuration changes.
 - Second identical approved run: both VMs report `changed=0`.
-- Repeat checks after VM reboot to ensure modules, sysctls and runtime
-  survive restart.
+- Run the separately approved automated reboot persistence test; expect
+  `STAGE42_REBOOT_VERIFIED` on successful validation of both guests.
 - Failure midway is possible even with the all-host preflight and serial
   application; do not assume automatic rollback. Inspect the recap and
   guest state before retrying. The playbook is designed for convergent
