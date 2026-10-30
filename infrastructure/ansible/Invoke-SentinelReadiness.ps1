@@ -5,11 +5,26 @@ param(
     [ValidatePattern('^[a-z][a-z0-9-]{0,31}$')][string]$Environment = 'lab',
     [ValidateNotNullOrEmpty()][string]$Distribution = 'Ubuntu-26.04',
     [string]$TrustedKnownHosts = (Join-Path $HOME '.ssh\known_hosts'),
-    [switch]$DiscoverBaseline
+    [switch]$DiscoverBaseline,
+    [switch]$PlanBaseline,
+    [switch]$ApplyBaseline,
+    [string]$ApprovalToken
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Fail before contacting any VM when options are ambiguous or approval is missing.
+if ($PlanBaseline.IsPresent -and $ApplyBaseline.IsPresent) {
+    throw 'BLOCKED: use either -PlanBaseline or -ApplyBaseline'
+}
+if ($ApplyBaseline.IsPresent) {
+    if ($ApprovalToken -cne 'APPLY_SENTINEL_STAGE42_TO_SANDBOX') {
+        throw 'BLOCKED: explicit sandbox apply approval is missing'
+    }
+} elseif ($ApprovalToken) {
+    throw 'BLOCKED: approval token only applies to -ApplyBaseline'
+}
 
 if (-not (Test-Path -LiteralPath $ConfigRepo -PathType Container)) {
     throw 'BLOCKED: private configuration clone is missing'
@@ -57,8 +72,12 @@ $configLinux = Convert-ToWslPath -PathOnWindows $ConfigRepo
 $knownHostsLinux = Convert-ToWslPath -PathOnWindows $TrustedKnownHosts
 $runnerLinux = Convert-ToWslPath -PathOnWindows $runner
 
-Write-Host 'Sentinel Stage 4.1: validating private config, trusted SSH records and guest readiness.'
-Write-Host 'No virtual machines will be provisioned or reconfigured.'
+Write-Host 'Sentinel: validating private config, trusted SSH records and guest readiness.'
+if ($ApplyBaseline.IsPresent) {
+    Write-Host 'APPROVED APPLY MODE: Stage 4.2 will change the sandbox guests.'
+} else {
+    Write-Host 'READ-ONLY MODE: no guest configuration will be changed.'
+}
 
 $wslArgs = @(
     '-d', $Distribution, '--', 'python3', $runnerLinux,
@@ -70,9 +89,21 @@ $wslArgs = @(
 if ($DiscoverBaseline.IsPresent) {
     $wslArgs += '--discover-baseline'
 }
+if ($PlanBaseline.IsPresent) {
+    $wslArgs += '--plan-baseline'
+}
+if ($ApplyBaseline.IsPresent) {
+    $wslArgs += @('--apply-baseline', '--approval-token', $ApprovalToken)
+}
 & wsl.exe @wslArgs
 $exitCode = $LASTEXITCODE
 if ($exitCode -ne 0) {
     throw "BLOCKED: Stage 4.1 validation failed (exit $exitCode)"
 }
-Write-Host 'PASS: Stage 4.1 readiness checks succeeded.'
+if ($ApplyBaseline.IsPresent) {
+    Write-Host 'PASS: Stage 4.2 approved apply returned successfully. Check recap for changes.'
+} elseif ($PlanBaseline.IsPresent) {
+    Write-Host 'PASS: Stage 4.2 read-only baseline plan complete.'
+} else {
+    Write-Host 'PASS: Sentinel readiness/discovery checks succeeded.'
+}
