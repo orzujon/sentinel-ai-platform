@@ -29,6 +29,8 @@ jobs:
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/00-readiness.yml
       - name: Validate read-only Stage 4.2 discovery playbook syntax
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/10-baseline-discovery.yml
+      - name: Validate gated Stage 4.2 containerd apply playbook syntax
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/20-containerd-baseline.yml
       - name: Execute Level 1 static package tests
         run: python -m unittest discover -s infrastructure/level1/tests -p 'test_*.py' -v
       - name: Demonstrate read-only sample plan
