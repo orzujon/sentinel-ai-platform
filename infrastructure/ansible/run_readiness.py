@@ -19,6 +19,12 @@ from render_inventory import build_inventory, save_private_inventory
 from render_inventory import parse_yaml, read_pinned_config, validate
 
 
+# Deliberately pinned: available on both guests in the 2026-10-30 discovery.
+# A version change requires a reviewed source-code change, not a CLI override.
+BASELINE_CONTAINERD_VERSION = "2.2.2-0ubuntu1.2"
+APPLY_APPROVAL = "APPLY_SENTINEL_STAGE42_TO_SANDBOX"
+
+
 class Stage4Blocked(Exception):
     pass
 
@@ -113,9 +119,28 @@ def main(argv=None) -> int:
         action="store_true",
         help="Run the Stage 4.2 read-only Ubuntu/containerd prerequisites inspection"
     )
+    parser.add_argument(
+        "--plan-baseline", action="store_true",
+        help="Read-only proposed changes for the pinned containerd node baseline"
+    )
+    parser.add_argument(
+        "--apply-baseline", action="store_true",
+        help="Change only verified sandbox guests after explicit approval"
+    )
+    parser.add_argument(
+        "--approval-token", default=None,
+        help="Required literal approval phrase when using --apply-baseline"
+    )
     args = parser.parse_args(argv)
 
     try:
+        if args.plan_baseline and args.apply_baseline:
+            raise Stage4Blocked("Choose plan or apply, not both")
+        if args.apply_baseline:
+            if args.approval_token != APPLY_APPROVAL:
+                raise Stage4Blocked("Explicit Stage 4.2 sandbox apply approval is missing")
+        elif args.approval_token is not None:
+            raise Stage4Blocked("Approval token only belongs to an apply run")
         if not re.fullmatch(r"[a-z][a-z0-9-]{0,31}", args.environment):
             raise Stage4Blocked("Invalid environment name")
         if not re.fullmatch(r"[0-9a-fA-F]{40}", args.revision):
@@ -151,7 +176,7 @@ def main(argv=None) -> int:
                         stage="Playbook syntax check")
         checked_command(["ansible-playbook", "-i", str(inventory_path), str(playbook)],
                         stage="Read-only guest readiness")
-        if args.discover_baseline:
+        if args.discover_baseline or args.plan_baseline or args.apply_baseline:
             discovery = Path(__file__).resolve().parent / "playbooks" / "10-baseline-discovery.yml"
             checked_command(
                 ["ansible-playbook", "-i", str(inventory_path), "--syntax-check",
@@ -191,6 +216,15 @@ def main(argv=None) -> int:
                     missing_candidates += 1
                 else:
                     candidates.append(candidate)
+                if args.plan_baseline or args.apply_baseline:
+                    if candidate != BASELINE_CONTAINERD_VERSION:
+                        raise Stage4Blocked("Containerd candidate differs from the reviewed version pin")
+                    if data["swapEntries"] != 0:
+                        raise Stage4Blocked("Active guest swap must be disabled before baseline apply")
+                    if data["containerdInstalled"] not in ("not-installed", BASELINE_CONTAINERD_VERSION):
+                        raise Stage4Blocked("Existing containerd version differs from pinned package")
+                    if data["runtimeConfigExists"] and data["containerdInstalled"] == "not-installed":
+                        raise Stage4Blocked("Unmanaged runtime config found before containerd installation")
                 print(
                     f"Node {index}/{len(machines)}: "
                     f"Ubuntu {data['distributionVersion']} | "
@@ -213,6 +247,48 @@ def main(argv=None) -> int:
                 raise Stage4Blocked("Different containerd candidates found across sandbox nodes")
             print(f"PRIVATE_REPORT: {report_dir}", flush=True)
             print("STAGE42_DISCOVERED: all guests inspected; remote changes=0", flush=True)
+            if args.plan_baseline or args.apply_baseline:
+                apply_playbook = (
+                    Path(__file__).resolve().parent
+                    / "playbooks" / "20-containerd-baseline.yml"
+                )
+                checked_command(
+                    ["ansible-playbook", "-i", str(inventory_path),
+                     "--syntax-check", str(apply_playbook)],
+                    stage="Pinned baseline syntax check"
+                )
+                if args.plan_baseline:
+                    print(
+                        f"PLAN_ONLY: proposed containerd {BASELINE_CONTAINERD_VERSION} "
+                        f"on {len(machines)} validated sandbox VMs", flush=True
+                    )
+                    print(
+                        "Would install pinned package and dependencies, persist/load "
+                        "overlay + br_netfilter, enable forwarding, configure systemd "
+                        "cgroups and CRI, then enable/verify containerd.", flush=True
+                    )
+                    print(
+                        "NO changes applied. This is an impact preview, not a guarantee "
+                        "about all installation side-effects.", flush=True
+                    )
+                else:
+                    print(
+                        f"APPLY_APPROVED: pinned containerd {BASELINE_CONTAINERD_VERSION} "
+                        f"to {len(machines)} isolated sandbox VMs; changing guest state",
+                        flush=True
+                    )
+                    checked_command(
+                        ["ansible-playbook", "-i", str(inventory_path),
+                         "-e", json.dumps({
+                             "sentinel_containerd_version": BASELINE_CONTAINERD_VERSION,
+                             "sentinel_apply_approved": True,
+                         }), str(apply_playbook)],
+                        stage="Stage 4.2 explicit-approval containerd baseline apply"
+                    )
+                    print(
+                        "STAGE42_APPLIED: review Ansible recap above and rerun for "
+                        "idempotence verification", flush=True
+                    )
         print("STAGE4_READY: all guest checks passed; no provisioning performed")
         return 0
     except (Stage4Blocked, OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
