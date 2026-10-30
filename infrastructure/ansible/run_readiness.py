@@ -6,15 +6,24 @@ Never trusts keys fetched from unverified remote servers and never modifies VMs.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from render_inventory import build_inventory, save_private_inventory
 from render_inventory import parse_yaml, read_pinned_config, validate
+
+
+# Deliberately pinned: available on both guests in the 2026-10-30 discovery.
+# A version change requires a reviewed source-code change, not a CLI override.
+BASELINE_CONTAINERD_VERSION = "2.2.2-0ubuntu1.2"
+APPLY_APPROVAL = "APPLY_SENTINEL_STAGE42_TO_SANDBOX"
+REBOOT_APPROVAL = "REBOOT_SENTINEL_STAGE42_SANDBOX"
 
 
 class Stage4Blocked(Exception):
@@ -78,6 +87,21 @@ def prepare_host_trust(addresses: list[str], known_hosts: Path,
     persist_immutable(destination, body)
 
 
+def parse_apt_candidate(policy: str) -> str | None:
+    """Interpret the actual apt-cache policy text, never a Jinja fallback."""
+    if not isinstance(policy, str) or len(policy) > 120_000:
+        return None
+    matches = re.findall(r"(?m)^\s*Candidate:\s*(\S+)\s*$", policy)
+    if len(matches) != 1:
+        return None
+    version = matches[0]
+    if version.lower() in {"(none)", "none"}:
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9:~+._-]{1,160}", version):
+        return None
+    return version
+
+
 def checked_command(args: list[str], *, stage: str) -> None:
     outcome = subprocess.run(args, check=False)
     if outcome.returncode:
@@ -91,9 +115,46 @@ def main(argv=None) -> int:
     parser.add_argument("--environment", required=True)
     parser.add_argument("--trusted-known-hosts", required=True,
                         help="Existing, independently accepted Windows OpenSSH known_hosts via WSL path")
+    parser.add_argument(
+        "--discover-baseline",
+        action="store_true",
+        help="Run the Stage 4.2 read-only Ubuntu/containerd prerequisites inspection"
+    )
+    parser.add_argument(
+        "--plan-baseline", action="store_true",
+        help="Read-only proposed changes for the pinned containerd node baseline"
+    )
+    parser.add_argument(
+        "--apply-baseline", action="store_true",
+        help="Change only verified sandbox guests after explicit approval"
+    )
+    parser.add_argument(
+        "--approval-token", default=None,
+        help="Required literal approval phrase when using --apply-baseline"
+    )
+    parser.add_argument(
+        "--reboot-validate", action="store_true",
+        help="Reboot only explicitly approved sandbox guests, one at a time, verifying persistence"
+    )
+    parser.add_argument(
+        "--reboot-approval-token", default=None,
+        help="Separate approval phrase required for disruptive sandbox reboots"
+    )
     args = parser.parse_args(argv)
 
     try:
+        if sum((bool(args.plan_baseline), bool(args.apply_baseline), bool(args.reboot_validate))) > 1:
+            raise Stage4Blocked("Choose plan, apply or reboot verification, not multiple modes")
+        if args.reboot_validate:
+            if args.reboot_approval_token != REBOOT_APPROVAL:
+                raise Stage4Blocked("Explicit sandbox reboot approval is missing")
+        elif args.reboot_approval_token is not None:
+            raise Stage4Blocked("Reboot approval token only belongs to a reboot validation run")
+        if args.apply_baseline:
+            if args.approval_token != APPLY_APPROVAL:
+                raise Stage4Blocked("Explicit Stage 4.2 sandbox apply approval is missing")
+        elif args.approval_token is not None:
+            raise Stage4Blocked("Approval token only belongs to an apply run")
         if not re.fullmatch(r"[a-z][a-z0-9-]{0,31}", args.environment):
             raise Stage4Blocked("Invalid environment name")
         if not re.fullmatch(r"[0-9a-fA-F]{40}", args.revision):
@@ -129,7 +190,156 @@ def main(argv=None) -> int:
                         stage="Playbook syntax check")
         checked_command(["ansible-playbook", "-i", str(inventory_path), str(playbook)],
                         stage="Read-only guest readiness")
-        print("STAGE4_READY: all guest checks passed; no provisioning performed")
+        if args.discover_baseline or args.plan_baseline or args.apply_baseline or args.reboot_validate:
+            discovery = Path(__file__).resolve().parent / "playbooks" / "10-baseline-discovery.yml"
+            checked_command(
+                ["ansible-playbook", "-i", str(inventory_path), "--syntax-check",
+                 str(discovery)],
+                stage="Baseline discovery syntax check"
+            )
+            report_dir = Path(tempfile.mkdtemp(
+                prefix=f"baseline-{args.environment}-{args.revision[:12]}-",
+                dir=state,
+            ))
+            checked_command(
+                ["ansible-playbook", "-i", str(inventory_path),
+                 "-e", json.dumps({"sentinel_report_root": str(report_dir)}),
+                 str(discovery)],
+                stage="Stage 4.2 baseline discovery"
+            )
+            required_fields = {
+                "containerdPolicyRaw", "containerdStablePolicyRaw",
+                "aptCacheStats", "containerdInstalled",
+                "runtimeConfigExists", "runtimeService",
+                "swapEntries", "ipv4Forwarding", "kernel",
+                "distribution", "distributionVersion", "architecture",
+            }
+            candidates = []
+            missing_candidates = 0
+            print("\nSENTINEL BASELINE DISCOVERY — READ ONLY", flush=True)
+            for index, machine in enumerate(machines, start=1):
+                report_path = report_dir / f"{machine['name']}.json"
+                if not report_path.is_file() or report_path.is_symlink():
+                    raise Stage4Blocked("A required private per-node report is missing")
+                data = json.loads(report_path.read_text(encoding="utf-8"))
+                if not isinstance(data, dict) or not required_fields.issubset(data):
+                    raise Stage4Blocked("The baseline report is incomplete")
+                candidate = parse_apt_candidate(data["containerdPolicyRaw"])
+                alternate = parse_apt_candidate(data["containerdStablePolicyRaw"])
+                if candidate is None:
+                    missing_candidates += 1
+                else:
+                    candidates.append(candidate)
+                if args.plan_baseline or args.apply_baseline or args.reboot_validate:
+                    if candidate != BASELINE_CONTAINERD_VERSION:
+                        raise Stage4Blocked("Containerd candidate differs from the reviewed version pin")
+                    if data["swapEntries"] != 0:
+                        raise Stage4Blocked("Active guest swap must be disabled before baseline apply")
+                    if data["containerdInstalled"] not in ("not-installed", BASELINE_CONTAINERD_VERSION):
+                        raise Stage4Blocked("Existing containerd version differs from pinned package")
+                    if data["runtimeConfigExists"] and data["containerdInstalled"] == "not-installed":
+                        raise Stage4Blocked("Unmanaged runtime config found before containerd installation")
+                    if args.reboot_validate:
+                        if (
+                            data["containerdInstalled"] != BASELINE_CONTAINERD_VERSION
+                            or data["runtimeConfigExists"] is not True
+                            or data["runtimeService"] != "active"
+                            or str(data["ipv4Forwarding"]) != "1"
+                        ):
+                            raise Stage4Blocked("Sandbox baseline is not fully installed; reboot not permitted")
+                print(
+                    f"Node {index}/{len(machines)}: "
+                    f"Ubuntu {data['distributionVersion']} | "
+                    f"containerd candidate {candidate or 'UNAVAILABLE'} | "
+                    f"containerd-stable alternative {alternate or 'UNAVAILABLE'} | "
+                    f"installed {data['containerdInstalled']} | "
+                    f"config exists {data['runtimeConfigExists']} | "
+                    f"service {data['runtimeService']} | "
+                    f"swap {data['swapEntries']} | "
+                    f"forwarding {data['ipv4Forwarding']}",
+                    flush=True,
+                )
+            if missing_candidates:
+                print(f"PRIVATE_REPORT: {report_dir}", flush=True)
+                raise Stage4Blocked(
+                    "APT reports no installable containerd candidate on one or more nodes. "
+                    "Inspect local APT metadata and repository sources; do not install or refresh packages automatically."
+                )
+            if len(set(candidates)) != 1:
+                raise Stage4Blocked("Different containerd candidates found across sandbox nodes")
+            print(f"PRIVATE_REPORT: {report_dir}", flush=True)
+            print("STAGE42_DISCOVERED: all guests inspected; remote changes=0", flush=True)
+            if args.plan_baseline or args.apply_baseline:
+                apply_playbook = (
+                    Path(__file__).resolve().parent
+                    / "playbooks" / "20-containerd-baseline.yml"
+                )
+                checked_command(
+                    ["ansible-playbook", "-i", str(inventory_path),
+                     "--syntax-check", str(apply_playbook)],
+                    stage="Pinned baseline syntax check"
+                )
+                if args.plan_baseline:
+                    print(
+                        f"PLAN_ONLY: proposed containerd {BASELINE_CONTAINERD_VERSION} "
+                        f"on {len(machines)} validated sandbox VMs", flush=True
+                    )
+                    print(
+                        "Would install pinned package and dependencies, persist/load "
+                        "overlay + br_netfilter, enable forwarding, configure systemd "
+                        "cgroups and CRI, then enable/verify containerd.", flush=True
+                    )
+                    print(
+                        "NO changes applied. This is an impact preview, not a guarantee "
+                        "about all installation side-effects.", flush=True
+                    )
+                else:
+                    print(
+                        f"APPLY_APPROVED: pinned containerd {BASELINE_CONTAINERD_VERSION} "
+                        f"to {len(machines)} isolated sandbox VMs; changing guest state",
+                        flush=True
+                    )
+                    checked_command(
+                        ["ansible-playbook", "-i", str(inventory_path),
+                         "-e", json.dumps({
+                             "sentinel_containerd_version": BASELINE_CONTAINERD_VERSION,
+                             "sentinel_apply_approved": True,
+                         }), str(apply_playbook)],
+                        stage="Stage 4.2 explicit-approval containerd baseline apply"
+                    )
+                    print(
+                        "STAGE42_APPLIED: review Ansible recap above and rerun for "
+                        "idempotence verification", flush=True
+                    )
+            if args.reboot_validate:
+                reboot_playbook = (
+                    Path(__file__).resolve().parent
+                    / "playbooks" / "30-reboot-persistence.yml"
+                )
+                checked_command(
+                    ["ansible-playbook", "-i", str(inventory_path),
+                     "--syntax-check", str(reboot_playbook)],
+                    stage="Reboot persistence playbook syntax check"
+                )
+                print(
+                    "REBOOT_APPROVED: both validated isolated sandbox VMs will reboot "
+                    "one at a time. No original VMs are targeted.",
+                    flush=True,
+                )
+                checked_command(
+                    ["ansible-playbook", "-i", str(inventory_path),
+                     "-e", json.dumps({
+                         "sentinel_reboot_approved": True,
+                         "sentinel_reboot_version": BASELINE_CONTAINERD_VERSION,
+                     }), str(reboot_playbook)],
+                    stage="Approved Stage 4.2 reboot persistence verification"
+                )
+                print(
+                    "STAGE42_REBOOT_VERIFIED: pinned containerd service, CRI and "
+                    "networking survived reboot on all sandbox guests",
+                    flush=True,
+                )
+        print("STAGE4_READY: guest readiness checks passed; configuration changes depend on selected mode")
         return 0
     except (Stage4Blocked, OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)

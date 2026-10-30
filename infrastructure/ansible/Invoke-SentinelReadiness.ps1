@@ -4,11 +4,41 @@ param(
     [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ConfigRepo,
     [ValidatePattern('^[a-z][a-z0-9-]{0,31}$')][string]$Environment = 'lab',
     [ValidateNotNullOrEmpty()][string]$Distribution = 'Ubuntu-26.04',
-    [string]$TrustedKnownHosts = (Join-Path $HOME '.ssh\known_hosts')
+    [string]$TrustedKnownHosts = (Join-Path $HOME '.ssh\known_hosts'),
+    [switch]$DiscoverBaseline,
+    [switch]$PlanBaseline,
+    [switch]$ApplyBaseline,
+    [string]$ApprovalToken,
+    [switch]$RebootValidate,
+    [string]$RebootApprovalToken
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Fail before contacting any VM when options are ambiguous or approval is missing.
+# Arithmetic preserves an integer when no mode or exactly one mode is selected.
+# Avoid pipeline scalar-unwrapping under Set-StrictMode -Version Latest.
+$selectedModeCount = [int]$PlanBaseline.IsPresent +
+    [int]$ApplyBaseline.IsPresent +
+    [int]$RebootValidate.IsPresent
+if ($selectedModeCount -gt 1) {
+    throw 'BLOCKED: choose plan, apply or reboot validation, not multiple modes'
+}
+if ($RebootValidate.IsPresent) {
+    if ($RebootApprovalToken -cne 'REBOOT_SENTINEL_STAGE42_SANDBOX') {
+        throw 'BLOCKED: explicit sandbox reboot approval is missing'
+    }
+} elseif ($RebootApprovalToken) {
+    throw 'BLOCKED: reboot approval token only applies to -RebootValidate'
+}
+if ($ApplyBaseline.IsPresent) {
+    if ($ApprovalToken -cne 'APPLY_SENTINEL_STAGE42_TO_SANDBOX') {
+        throw 'BLOCKED: explicit sandbox apply approval is missing'
+    }
+} elseif ($ApprovalToken) {
+    throw 'BLOCKED: approval token only applies to -ApplyBaseline'
+}
 
 if (-not (Test-Path -LiteralPath $ConfigRepo -PathType Container)) {
     throw 'BLOCKED: private configuration clone is missing'
@@ -56,8 +86,14 @@ $configLinux = Convert-ToWslPath -PathOnWindows $ConfigRepo
 $knownHostsLinux = Convert-ToWslPath -PathOnWindows $TrustedKnownHosts
 $runnerLinux = Convert-ToWslPath -PathOnWindows $runner
 
-Write-Host 'Sentinel Stage 4.1: validating private config, trusted SSH records and guest readiness.'
-Write-Host 'No virtual machines will be provisioned or reconfigured.'
+Write-Host 'Sentinel: validating private config, trusted SSH records and guest readiness.'
+if ($ApplyBaseline.IsPresent) {
+    Write-Host 'APPROVED APPLY MODE: Stage 4.2 will change the sandbox guests.'
+} elseif ($RebootValidate.IsPresent) {
+    Write-Host 'APPROVED REBOOT MODE: Stage 4.2 will reboot both sandbox VMs sequentially.'
+} else {
+    Write-Host 'READ-ONLY MODE: no guest configuration will be changed.'
+}
 
 $wslArgs = @(
     '-d', $Distribution, '--', 'python3', $runnerLinux,
@@ -66,9 +102,29 @@ $wslArgs = @(
     '--environment', $Environment,
     '--trusted-known-hosts', $knownHostsLinux
 )
+if ($DiscoverBaseline.IsPresent) {
+    $wslArgs += '--discover-baseline'
+}
+if ($PlanBaseline.IsPresent) {
+    $wslArgs += '--plan-baseline'
+}
+if ($ApplyBaseline.IsPresent) {
+    $wslArgs += @('--apply-baseline', '--approval-token', $ApprovalToken)
+}
+if ($RebootValidate.IsPresent) {
+    $wslArgs += @('--reboot-validate', '--reboot-approval-token', $RebootApprovalToken)
+}
 & wsl.exe @wslArgs
 $exitCode = $LASTEXITCODE
 if ($exitCode -ne 0) {
     throw "BLOCKED: Stage 4.1 validation failed (exit $exitCode)"
 }
-Write-Host 'PASS: Stage 4.1 readiness checks succeeded.'
+if ($ApplyBaseline.IsPresent) {
+    Write-Host 'PASS: Stage 4.2 approved apply returned successfully. Check recap for changes.'
+} elseif ($RebootValidate.IsPresent) {
+    Write-Host 'PASS: Stage 4.2 reboot persistence verification completed on both sandbox guests.'
+} elseif ($PlanBaseline.IsPresent) {
+    Write-Host 'PASS: Stage 4.2 read-only baseline plan complete.'
+} else {
+    Write-Host 'PASS: Sentinel readiness/discovery checks succeeded.'
+}

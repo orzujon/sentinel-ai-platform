@@ -1,0 +1,139 @@
+---
+# Sentinel Stage 4.2: discover Ubuntu package and node configuration.
+# INTENTIONALLY READ ONLY. No become, no package cache update, no mutation.
+- name: Discover baseline prerequisites on isolated sandbox guests
+  hosts: sentinel_sandbox
+  gather_facts: true
+  any_errors_fatal: true
+  serial: 1
+  tasks:
+    - name: Require supported Ubuntu version and architecture
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] is version('26.04', '>=')
+          - ansible_facts['distribution_major_version'] == '26'
+          - ansible_facts['architecture'] == 'x86_64'
+          - ansible_facts['service_mgr'] == 'systemd'
+        fail_msg: "Unsupported guest OS, architecture or init system; no baseline changes allowed"
+
+    - name: Detect an existing Kubernetes node configuration
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /etc/kubernetes/admin.conf
+        - /var/lib/kubelet/config.yaml
+      register: sentinel_kubernetes_files
+
+    - name: Block modifying already bootstrapped Kubernetes nodes
+      ansible.builtin.assert:
+        that:
+          - not (sentinel_kubernetes_files.results | map(attribute='stat.exists') | select | list)
+        fail_msg: "Existing Kubernetes configuration found; never auto-reconfigure an established node"
+
+    - name: Inspect available Ubuntu package version of containerd
+      ansible.builtin.command:
+        argv: [apt-cache, policy, containerd]
+      register: sentinel_containerd_policy
+      changed_when: false
+
+    # Do not infer the package version from Ansible Jinja filtering. Capture
+    # raw APT policy and have the controller parse and enforce its candidate.
+    - name: Inspect alternate Ubuntu containerd-stable package
+      ansible.builtin.command:
+        argv: [apt-cache, policy, containerd-stable]
+      register: sentinel_containerd_stable_policy
+      changed_when: false
+
+    - name: Inspect available local APT index metadata
+      ansible.builtin.command:
+        argv: [apt-cache, stats]
+      register: sentinel_apt_cache_stats
+      changed_when: false
+
+    - name: Inspect currently installed containerd package
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Version}", containerd]
+      register: sentinel_installed
+      changed_when: false
+      failed_when: false
+
+    - name: Inspect existing runtime configuration
+      ansible.builtin.stat:
+        path: /etc/containerd/config.toml
+        follow: false
+      register: sentinel_runtime_config
+
+    - name: Inspect swap configuration without disabling it
+      ansible.builtin.command:
+        argv: [cat, /proc/swaps]
+      register: sentinel_swaps
+      changed_when: false
+
+    - name: Inspect current IP forwarding
+      ansible.builtin.command:
+        argv: [sysctl, -n, net.ipv4.ip_forward]
+      register: sentinel_forwarding
+      changed_when: false
+
+    - name: Inspect active runtime service without starting it
+      ansible.builtin.command:
+        argv: [systemctl, is-active, containerd]
+      register: sentinel_runtime_service
+      changed_when: false
+      failed_when: false
+
+    - name: Inspect kernel version
+      ansible.builtin.command:
+        argv: [uname, -r]
+      register: sentinel_kernel
+      changed_when: false
+
+    - name: Report read-only baseline discovery summary
+      ansible.builtin.debug:
+        msg:
+          - "Guest architecture and OS verified"
+          - "Kernel={{ sentinel_kernel.stdout }}"
+          - "APT policy collected; candidate will be verified by management controller"
+          - "Installed containerd={{ sentinel_installed.stdout if sentinel_installed.rc == 0 else 'not installed' }}"
+          - "Existing config.toml={{ sentinel_runtime_config.stat.exists }}"
+          - "containerd service={{ sentinel_runtime_service.stdout | default('unknown') }}"
+          - "Swap entries={{ (sentinel_swaps.stdout_lines | length) - 1 }}"
+          - "IPv4 forwarding={{ sentinel_forwarding.stdout }}"
+          - "RESULT=DISCOVERY_ONLY; no changes performed"
+
+    - name: Require an operator-private controller report directory
+      ansible.builtin.assert:
+        that:
+          - sentinel_report_root is defined
+          - sentinel_report_root is string
+          - sentinel_report_root.startswith('/home/')
+        fail_msg: "Missing WSL-private reporting directory; abort without saving environment data"
+
+    - name: Save discovery evidence only on Ansible controller
+      ansible.builtin.copy:
+        dest: "{{ sentinel_report_root }}/{{ inventory_hostname }}.json"
+        mode: '0600'
+        content: >-
+          {{
+            {
+              'containerdPolicyRaw': sentinel_containerd_policy.stdout,
+              'containerdStablePolicyRaw': sentinel_containerd_stable_policy.stdout,
+              'aptCacheStats': sentinel_apt_cache_stats.stdout,
+              'containerdInstalled': (
+                sentinel_installed.stdout if sentinel_installed.rc == 0 else 'not-installed'
+              ),
+              'runtimeConfigExists': sentinel_runtime_config.stat.exists,
+              'runtimeService': sentinel_runtime_service.stdout | default('unknown'),
+              'swapEntries': ((sentinel_swaps.stdout_lines | length) - 1),
+              'ipv4Forwarding': sentinel_forwarding.stdout | trim,
+              'kernel': sentinel_kernel.stdout | trim,
+              'distribution': ansible_facts['distribution'],
+              'distributionVersion': ansible_facts['distribution_version'],
+              'architecture': ansible_facts['architecture']
+            } | to_nice_json
+          }}
+      delegate_to: localhost
+      become: false
+      no_log: true

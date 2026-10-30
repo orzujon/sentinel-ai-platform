@@ -1,0 +1,156 @@
+---
+# Stage 4.2 optional reboot persistence test; never invoked during plan/apply.
+# PRECONDITION: management controller has checked private pinned config + SSH trust.
+- name: Verify every sandbox VM is safe to reboot
+  hosts: sentinel_sandbox
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    sentinel_expected_containerd: "2.2.2-0ubuntu1.2"
+    sentinel_runtime_marker: "# Managed by Sentinel Stage 4.2 - isolated sandbox only"
+  tasks:
+    - name: Require separate approval for disruptive sandbox reboot
+      ansible.builtin.assert:
+        that:
+          - sentinel_reboot_approved | default(false) | bool
+          - sentinel_reboot_version is defined
+          - sentinel_reboot_version == sentinel_expected_containerd
+          - sentinel_expected_hostname is defined
+        fail_msg: "BLOCKED: reboot approval or pin/identity missing"
+
+    - name: Detect existing Kubernetes cluster state
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /etc/kubernetes/admin.conf
+        - /etc/kubernetes/kubelet.conf
+        - /var/lib/kubelet/config.yaml
+      register: sentinel_kube_state
+
+    - name: Refuse to reboot an already initialized Kubernetes node
+      ansible.builtin.assert:
+        that:
+          - not (sentinel_kube_state.results | map(attribute='stat.exists') | select | list)
+        fail_msg: "BLOCKED: existing Kubernetes node detected"
+
+    - name: Inspect current identity
+      ansible.builtin.command:
+        argv: [hostname]
+      register: sentinel_hostname
+      changed_when: false
+
+    - name: Confirm the intended VM identity
+      ansible.builtin.assert:
+        that:
+          - sentinel_hostname.stdout | trim == sentinel_expected_hostname
+
+    - name: Inspect pinned installed containerd version
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Version}", containerd]
+      register: sentinel_containerd_before
+      changed_when: false
+
+    - name: Read the existing containerd configuration
+      ansible.builtin.slurp:
+        src: /etc/containerd/config.toml
+      register: sentinel_containerd_config
+
+    - name: Require Sentinel managed containerd 2.x configuration
+      ansible.builtin.assert:
+        that:
+          - sentinel_containerd_before.stdout == sentinel_expected_containerd
+          - (sentinel_containerd_config.content | b64decode).startswith(sentinel_runtime_marker)
+          - "'version = 3' in (sentinel_containerd_config.content | b64decode)"
+          - "'SystemdCgroup = true' in (sentinel_containerd_config.content | b64decode)"
+          - "'io.containerd.cri.v1.runtime' in (sentinel_containerd_config.content | b64decode)"
+        fail_msg: "BLOCKED: unexpected runtime package or config"
+
+    - name: Inspect current containerd service state
+      ansible.builtin.command:
+        argv: [systemctl, is-active, containerd]
+      register: sentinel_containerd_active
+      changed_when: false
+
+    - name: Require the runtime to be running before reboot
+      ansible.builtin.assert:
+        that:
+          - sentinel_containerd_active.stdout == 'active'
+
+- name: Reboot isolated VMs sequentially and prove persisted runtime settings
+  hosts: sentinel_sandbox
+  gather_facts: false
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    sentinel_expected_containerd: "2.2.2-0ubuntu1.2"
+  tasks:
+    - name: Reboot approved isolated sandbox guest and wait for SSH
+      ansible.builtin.reboot:
+        reboot_timeout: 600
+        connect_timeout: 15
+        post_reboot_delay: 10
+        test_command: /bin/true
+
+    - name: Confirm pinned runtime package persists
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Version}", containerd]
+      register: sentinel_after_version
+      changed_when: false
+
+    - name: Confirm containerd service restarted
+      ansible.builtin.command:
+        argv: [systemctl, is-active, containerd]
+      register: sentinel_after_service
+      changed_when: false
+
+    - name: Confirm containerd starts automatically on reboot
+      ansible.builtin.command:
+        argv: [systemctl, is-enabled, containerd]
+      register: sentinel_after_enabled
+      changed_when: false
+
+    - name: Confirm persistent IPv4 forwarding
+      ansible.builtin.command:
+        argv: [sysctl, -n, net.ipv4.ip_forward]
+      register: sentinel_after_forward
+      changed_when: false
+
+    - name: Confirm persistent bridge netfilter setting
+      ansible.builtin.command:
+        argv: [sysctl, -n, net.bridge.bridge-nf-call-iptables]
+      register: sentinel_after_bridge
+      changed_when: false
+
+    - name: Confirm Kubernetes kernel modules are available
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /sys/module/overlay
+        - /sys/module/br_netfilter
+      register: sentinel_after_modules
+
+    - name: Confirm containerd CRI plugin is loaded
+      ansible.builtin.command:
+        argv: [ctr, plugins, ls]
+      register: sentinel_after_plugins
+      changed_when: false
+
+    - name: Assert persisted container runtime health
+      ansible.builtin.assert:
+        that:
+          - sentinel_after_version.stdout == sentinel_expected_containerd
+          - sentinel_after_service.stdout == 'active'
+          - sentinel_after_enabled.stdout == 'enabled'
+          - sentinel_after_forward.stdout | trim == '1'
+          - sentinel_after_bridge.stdout | trim == '1'
+          - sentinel_after_modules.results | map(attribute='stat.exists') | select | list | length == 2
+          - "'io.containerd.cri.v1' in sentinel_after_plugins.stdout"
+        fail_msg: "BLOCKED: one or more runtime settings failed to survive reboot"
+
+    - name: Report verified persistence on isolated VM
+      ansible.builtin.debug:
+        msg: "REBOOT_PERSISTENCE_PASS; pinned containerd, service, CRI and networking recovered"
