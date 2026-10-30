@@ -2,16 +2,15 @@
 # Sentinel Stage 4.2. NEVER invoked by default discovery.
 # This playbook mutates sandbox Ubuntu guests ONLY after explicit operator approval
 # and controller-side private configuration + SSH verification.
-- name: Apply version-pinned Kubernetes container runtime baseline
+- name: Preflight all isolated guests before any baseline change
   hosts: sentinel_sandbox
   gather_facts: true
   become: true
-  serial: 1
   any_errors_fatal: true
   vars:
     sentinel_expected_containerd: "2.2.2-0ubuntu1.2"
     sentinel_runtime_marker: "# Managed by Sentinel Stage 4.2 - isolated sandbox only"
-  pre_tasks:
+  tasks:
     - name: Require exact controller-approved package revision
       ansible.builtin.assert:
         that:
@@ -105,6 +104,14 @@
         argv: [python3, -c, "import apt"]
       changed_when: false
 
+- name: Apply version-pinned Kubernetes container runtime baseline
+  hosts: sentinel_sandbox
+  gather_facts: false
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    sentinel_expected_containerd: "2.2.2-0ubuntu1.2"
   tasks:
     - name: Install exact Ubuntu containerd revision without upgrading others
       ansible.builtin.apt:
