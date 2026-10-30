@@ -8,15 +8,26 @@ param(
     [switch]$DiscoverBaseline,
     [switch]$PlanBaseline,
     [switch]$ApplyBaseline,
-    [string]$ApprovalToken
+    [string]$ApprovalToken,
+    [switch]$RebootValidate,
+    [string]$RebootApprovalToken
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # Fail before contacting any VM when options are ambiguous or approval is missing.
-if ($PlanBaseline.IsPresent -and $ApplyBaseline.IsPresent) {
-    throw 'BLOCKED: use either -PlanBaseline or -ApplyBaseline'
+$selectedModes = @($PlanBaseline.IsPresent, $ApplyBaseline.IsPresent, $RebootValidate.IsPresent) |
+    Where-Object { $_ }
+if ($selectedModes.Count -gt 1) {
+    throw 'BLOCKED: choose plan, apply or reboot validation, not multiple modes'
+}
+if ($RebootValidate.IsPresent) {
+    if ($RebootApprovalToken -cne 'REBOOT_SENTINEL_STAGE42_SANDBOX') {
+        throw 'BLOCKED: explicit sandbox reboot approval is missing'
+    }
+} elseif ($RebootApprovalToken) {
+    throw 'BLOCKED: reboot approval token only applies to -RebootValidate'
 }
 if ($ApplyBaseline.IsPresent) {
     if ($ApprovalToken -cne 'APPLY_SENTINEL_STAGE42_TO_SANDBOX') {
@@ -75,6 +86,8 @@ $runnerLinux = Convert-ToWslPath -PathOnWindows $runner
 Write-Host 'Sentinel: validating private config, trusted SSH records and guest readiness.'
 if ($ApplyBaseline.IsPresent) {
     Write-Host 'APPROVED APPLY MODE: Stage 4.2 will change the sandbox guests.'
+} elseif ($RebootValidate.IsPresent) {
+    Write-Host 'APPROVED REBOOT MODE: Stage 4.2 will reboot both sandbox VMs sequentially.'
 } else {
     Write-Host 'READ-ONLY MODE: no guest configuration will be changed.'
 }
@@ -95,6 +108,9 @@ if ($PlanBaseline.IsPresent) {
 if ($ApplyBaseline.IsPresent) {
     $wslArgs += @('--apply-baseline', '--approval-token', $ApprovalToken)
 }
+if ($RebootValidate.IsPresent) {
+    $wslArgs += @('--reboot-validate', '--reboot-approval-token', $RebootApprovalToken)
+}
 & wsl.exe @wslArgs
 $exitCode = $LASTEXITCODE
 if ($exitCode -ne 0) {
@@ -102,6 +118,8 @@ if ($exitCode -ne 0) {
 }
 if ($ApplyBaseline.IsPresent) {
     Write-Host 'PASS: Stage 4.2 approved apply returned successfully. Check recap for changes.'
+} elseif ($RebootValidate.IsPresent) {
+    Write-Host 'PASS: Stage 4.2 reboot persistence verification completed on both sandbox guests.'
 } elseif ($PlanBaseline.IsPresent) {
     Write-Host 'PASS: Stage 4.2 read-only baseline plan complete.'
 } else {
