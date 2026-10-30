@@ -1,0 +1,245 @@
+---
+# Sentinel Stage 4.2. NEVER invoked by default discovery.
+# This playbook mutates sandbox Ubuntu guests ONLY after explicit operator approval
+# and controller-side private configuration + SSH verification.
+- name: Apply version-pinned Kubernetes container runtime baseline
+  hosts: sentinel_sandbox
+  gather_facts: true
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    sentinel_expected_containerd: "2.2.2-0ubuntu1.2"
+    sentinel_runtime_marker: "# Managed by Sentinel Stage 4.2 - isolated sandbox only"
+  pre_tasks:
+    - name: Require exact controller-approved package revision
+      ansible.builtin.assert:
+        that:
+          - sentinel_containerd_version is defined
+          - sentinel_containerd_version == sentinel_expected_containerd
+          - sentinel_apply_approved | default(false) | bool
+          - ansible_facts['distribution'] == "Ubuntu"
+          - ansible_facts['distribution_version'] == "26.04"
+          - ansible_facts['architecture'] == "x86_64"
+          - ansible_facts['service_mgr'] == "systemd"
+        fail_msg: "BLOCKED: version, approval, guest distribution, or architecture mismatch"
+
+    - name: Detect Kubernetes installation markers before any modification
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /etc/kubernetes/admin.conf
+        - /var/lib/kubelet/config.yaml
+        - /etc/kubernetes/kubelet.conf
+      register: sentinel_cluster_markers
+
+    - name: Block an existing Kubernetes node
+      ansible.builtin.assert:
+        that:
+          - not (sentinel_cluster_markers.results | map(attribute='stat.exists') | select | list)
+        fail_msg: "BLOCKED: Kubernetes node configuration already exists"
+
+    - name: Inspect current swap usage
+      ansible.builtin.command:
+        argv: [cat, /proc/swaps]
+      register: sentinel_swap
+      changed_when: false
+
+    - name: Require swap already disabled without modifying swap configuration
+      ansible.builtin.assert:
+        that:
+          - sentinel_swap.stdout_lines | length == 1
+        fail_msg: "BLOCKED: swap is enabled; this playbook will not disable it"
+
+    - name: Verify containerd candidate in current APT metadata
+      ansible.builtin.command:
+        argv: [apt-cache, policy, containerd]
+      register: sentinel_policy
+      changed_when: false
+
+    - name: Require pinned containerd candidate
+      ansible.builtin.assert:
+        that:
+          - "'Candidate: ' ~ sentinel_expected_containerd in sentinel_policy.stdout"
+        fail_msg: "BLOCKED: pinned containerd revision is not the current APT candidate"
+
+    - name: Inspect currently installed containerd revision
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Version}", containerd]
+      register: sentinel_installed_containerd
+      changed_when: false
+      failed_when: false
+
+    - name: Block differing pre-existing containerd installation
+      ansible.builtin.assert:
+        that:
+          - sentinel_installed_containerd.rc != 0 or sentinel_installed_containerd.stdout == sentinel_expected_containerd
+        fail_msg: "BLOCKED: another version of containerd is already installed"
+
+    - name: Inspect existing runtime configuration
+      ansible.builtin.stat:
+        path: /etc/containerd/config.toml
+        follow: false
+      register: sentinel_existing_config
+
+    - name: Inspect existing runtime configuration contents if present
+      ansible.builtin.slurp:
+        src: /etc/containerd/config.toml
+      register: sentinel_existing_runtime
+      when: sentinel_existing_config.stat.exists and sentinel_existing_config.stat.isreg
+
+    - name: Refuse to overwrite unmanaged or non-regular runtime configuration
+      ansible.builtin.assert:
+        that:
+          - >-
+            (not sentinel_existing_config.stat.exists)
+            or (
+              sentinel_existing_config.stat.isreg
+              and (sentinel_existing_runtime.content | default('') | b64decode).startswith(sentinel_runtime_marker)
+            )
+        fail_msg: "BLOCKED: /etc/containerd/config.toml is not Sentinel-managed"
+
+    - name: Require locally available python3-apt dependency
+      ansible.builtin.command:
+        argv: [python3, -c, "import apt"]
+      changed_when: false
+
+  tasks:
+    - name: Install exact Ubuntu containerd revision without upgrading others
+      ansible.builtin.apt:
+        name: "containerd={{ sentinel_expected_containerd }}"
+        state: present
+        update_cache: false
+        allow_downgrade: false
+        allow_change_held_packages: false
+        auto_install_module_deps: false
+        fail_on_autoremove: true
+
+    - name: Persist Kubernetes kernel modules across reboot
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/99-sentinel-k8s.conf
+        content: |
+          overlay
+          br_netfilter
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Load overlay kernel module when absent
+      ansible.builtin.command:
+        argv: [modprobe, overlay]
+        creates: /sys/module/overlay
+
+    - name: Load bridge netfilter kernel module when absent
+      ansible.builtin.command:
+        argv: [modprobe, br_netfilter]
+        creates: /sys/module/br_netfilter
+
+    - name: Persist Kubernetes-specific kernel networking settings
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-sentinel-k8s.conf
+        content: |
+          net.ipv4.ip_forward = 1
+          net.bridge.bridge-nf-call-iptables = 1
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Inspect active IPv4 forwarding value
+      ansible.builtin.command:
+        argv: [sysctl, -n, net.ipv4.ip_forward]
+      register: sentinel_ip_forward
+      changed_when: false
+
+    - name: Activate IPv4 forwarding only when needed
+      ansible.builtin.command:
+        argv: [sysctl, -w, net.ipv4.ip_forward=1]
+      when: sentinel_ip_forward.stdout | trim != '1'
+
+    - name: Inspect active bridge netfilter value
+      ansible.builtin.command:
+        argv: [sysctl, -n, net.bridge.bridge-nf-call-iptables]
+      register: sentinel_bridge_forward
+      changed_when: false
+
+    - name: Activate bridge netfilter only when needed
+      ansible.builtin.command:
+        argv: [sysctl, -w, net.bridge.bridge-nf-call-iptables=1]
+      when: sentinel_bridge_forward.stdout | trim != '1'
+
+    - name: Ensure containerd configuration directory is present
+      ansible.builtin.file:
+        path: /etc/containerd
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Configure containerd v2 CRI runtime and systemd cgroups
+      ansible.builtin.copy:
+        dest: /etc/containerd/config.toml
+        content: |
+          # Managed by Sentinel Stage 4.2 - isolated sandbox only
+          version = 3
+          disabled_plugins = []
+
+          [plugins.'io.containerd.cri.v1.runtime'.containerd]
+            default_runtime_name = "runc"
+
+          [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc]
+            runtime_type = "io.containerd.runc.v2"
+
+          [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc.options]
+            SystemdCgroup = true
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart containerd after managed configuration change
+
+    - name: Validate containerd TOML configuration before service restart
+      ansible.builtin.command:
+        argv: [containerd, --config, /etc/containerd/config.toml, config, dump]
+      changed_when: false
+      no_log: true
+
+    - name: Restart containerd if its configuration changed
+      ansible.builtin.meta: flush_handlers
+
+    - name: Ensure containerd service is enabled and running
+      ansible.builtin.systemd_service:
+        name: containerd
+        state: started
+        enabled: true
+
+    - name: Confirm installed package version is still pinned
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Version}", containerd]
+      register: sentinel_installed_after
+      changed_when: false
+
+    - name: Confirm containerd service is active
+      ansible.builtin.command:
+        argv: [systemctl, is-active, containerd]
+      register: sentinel_service_after
+      changed_when: false
+
+    - name: Confirm CRI runtime plugins are registered
+      ansible.builtin.command:
+        argv: [ctr, plugins, ls]
+      register: sentinel_plugins_after
+      changed_when: false
+
+    - name: Require installed version, active service and CRI plugin
+      ansible.builtin.assert:
+        that:
+          - sentinel_installed_after.stdout == sentinel_expected_containerd
+          - sentinel_service_after.stdout == 'active'
+          - "'io.containerd.cri.v1' in sentinel_plugins_after.stdout"
+        fail_msg: "BLOCKED: containerd health or CRI validation failed"
+
+  handlers:
+    - name: Restart containerd after managed configuration change
+      ansible.builtin.systemd_service:
+        name: containerd
+        state: restarted
