@@ -17,9 +17,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # Fail before contacting any VM when options are ambiguous or approval is missing.
-$selectedModes = @($PlanBaseline.IsPresent, $ApplyBaseline.IsPresent, $RebootValidate.IsPresent) |
-    Where-Object { $_ }
-if ($selectedModes.Count -gt 1) {
+# Arithmetic preserves an integer when no mode or exactly one mode is selected.
+# Avoid pipeline scalar-unwrapping under Set-StrictMode -Version Latest.
+$selectedModeCount = [int]$PlanBaseline.IsPresent +
+    [int]$ApplyBaseline.IsPresent +
+    [int]$RebootValidate.IsPresent
+if ($selectedModeCount -gt 1) {
     throw 'BLOCKED: choose plan, apply or reboot validation, not multiple modes'
 }
 if ($RebootValidate.IsPresent) {
