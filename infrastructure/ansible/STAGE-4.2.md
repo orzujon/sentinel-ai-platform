@@ -1,66 +1,89 @@
-# Stage 4.2 — Ubuntu baseline and containerd (controlled rollout)
+# Stage 4.2 — idempotent Ubuntu/containerd baseline (approval gated)
 
-**First increment: read-only discovery only.** The Stage 4.1 management
-runner remains our trusted entrypoint. Do not install packages, change kernel
-settings, disable swap or restart services until we have an explicit,
-reviewed apply policy and the inventory inspection passes.
+This stage targets only the private-YAML-validated **isolated sandbox** guests.
+The previously existing Kubernetes VMs and networking remain protected.
 
-## Purpose
+## Verified discovery on 2026-10-30
 
-We need reproducible Ubuntu 26.04 amd64 Kubernetes nodes using containerd
-with CRI enabled and a systemd-compatible cgroup driver. Containerd 1.x and
-2.x have **different configuration schemas**, so we first discover the
-exact version offered by the Ubuntu apt metadata rather than assuming it.
-See https://kubernetes.io/docs/setup/production-environment/container-runtimes/
+Both sandbox guests reported:
+- Ubuntu 26.04 amd64; containerd not installed; no runtime config
+- `containerd` candidate: `2.2.2-0ubuntu1.2`
+- Swap: 0; IPv4 forwarding: 0
+- Both hosts passed Stage 4.1 SSH identity and guest readiness checks
 
-## Single-command, read-only discovery
+The package revision is **pinned in reviewed source code**; changing it requires
+a code review. The `containerd-stable` alternative is *not* selected.
 
-From Windows PowerShell, using the Stage 4.2 feature branch:
+## Read-only plan — first operator action
+
+From PowerShell on the `feature/stage4-ubuntu-runtime-baseline` branch:
 
 ```powershell
-.\infrastructure\ansible\Invoke-SentinelReadiness.ps1 -ConfigRepo 'C:\PRIVATE-CONFIG-CLONE' -DiscoverBaseline
+.\infrastructure\ansible\Invoke-SentinelReadiness.ps1 -ConfigRepo 'C:\PRIVATE-CONFIG-CLONE' -PlanBaseline
 ```
 
-The command reuses the immutable private YAML revision, validates the
-previously trusted SSH host keys, and runs Stage 4.1 guest readiness before
-Stage 4.2 discovery. The inventory stays private inside WSL.
+The plan first reruns read-only Stage 4.1 and Stage 4.2 discovery, verifies
+that both Ubuntu guests still offer the exact pinned revision, inspects
+swap and existing runtime state, validates the install playbook syntax,
+and emits `PLAN_ONLY`.
 
-Automated checks include:
-- Only Ubuntu 26.04+ amd64 systemd guests
-- No pre-existing kubelet configuration or Kubernetes admin credentials
-- Candidate package version from **current local apt metadata** (no apt update)
-- Installed containerd version and existing `/etc/containerd/config.toml`
-- Containerd service state, swap usage, IP forwarding and kernel version
+**No packages, services or guest configuration are changed by the plan.**
+The plan is a description of intended actions, not an Ansible check-mode
+guarantee or a fully simulated APT transaction.
 
-The command prints one concise discovery summary per guest and
-`STAGE42_DISCOVERED` on success. All discovery actions are read-only and
-must report `changed=0`. Existing cluster detections are BLOCKED.
+## Explicit apply — only after reviewing the plan and approving changes
 
-## Next controlled implementation (not in this increment)
+The following command intentionally changes the two sandbox VMs; do not
+run it as part of discovery:
 
-After discovering both nodes' exact package candidates, we will implement
-a **version-pinned, idempotent** Ansible apply with explicit operator
-approval and a named, isolated target group. It will:
+```powershell
+.\infrastructure\ansible\Invoke-SentinelReadiness.ps1 `
+    -ConfigRepo 'C:\PRIVATE-CONFIG-CLONE' `
+    -ApplyBaseline `
+    -ApprovalToken 'APPLY_SENTINEL_STAGE42_TO_SANDBOX'
+```
 
-1. Require the same pinned image/config/host identity and reject existing
-   Kubernetes nodes or unexpected pre-installed runtime configurations.
-2. Install a deliberately selected Ubuntu containerd package revision,
-   not the moving `latest`; verify containerd 2.x / runc compatibility.
-3. Manage overlay and br_netfilter load-on-boot modules, IPv4 forwarding
-   and Linux bridge netfilter settings.
-4. Configure CRI and the systemd cgroup driver with the correct
-   containerd-version-specific schema; ensure service is enabled/running.
-5. Handle swap through an explicit policy decision (not a silent
-   `swapoff -a`) and avoid touching existing fstab without review.
-6. Validate the CRI socket, active service and a second convergent
-   apply (`changed=0`). Retain logs and change decisions locally.
+The controller rejects missing/incorrect approval, then revalidates the
+private config revision and SSH trust, checks both hosts, and runs **both
+guests' full read-only preflight before changing either**. It will fail
+rather than touch a host with existing Kubernetes credentials/kubelet
+configuration, unexpected installed containerd revision, unmanaged
+`/etc/containerd/config.toml`, enabled swap, or missing package candidate.
 
-Ansible check mode can preview many but **not all** future effects. A
-successful discovery or `--check` is *not* authorization to apply.
+The approved apply uses `serial: 1` and Ansible's `become` to:
 
-## Security boundaries
+1. Install exactly `containerd=2.2.2-0ubuntu1.2` from existing signed
+   configured APT indexes, with no package cache refresh, no intentional
+   upgrade, downgrade or package removal. APT may install required
+   dependencies and start the packaged service.
+2. Load and persist `overlay` and `br_netfilter` modules.
+3. Persist and activate `net.ipv4.ip_forward=1` and
+   `net.bridge.bridge-nf-call-iptables=1`.
+4. Manage a `version=3` containerd 2.x CRI config with the
+   `io.containerd.cri.v1.runtime` plugin, `runc` and
+   `SystemdCgroup=true`.
+5. Restart containerd only when the managed runtime config changes,
+   keep it enabled, and assert the pinned installed revision, active
+   service and registered CRI plugin.
 
-The previously operational Kubernetes hosts are not Stage 4 targets.
-No environment-specific VM names, addresses, SSH keys, or filesystem
-inventory should be committed to this public repository. All targets
-are derived from the private YAML and fail-closed policy validator.
+It deliberately does **not** disable swap, rewrite `/etc/fstab`,
+install kubeadm/kubelet, initialize a Kubernetes cluster or modify
+Windows Hyper-V resources.
+
+## Acceptance and rerun contract
+
+- First approved run: both sandbox VMs report `failed=0`,
+  `unreachable=0`, with expected configuration changes.
+- Second identical approved run: both VMs report `changed=0`.
+- Repeat checks after VM reboot to ensure modules, sysctls and runtime
+  survive restart.
+- Failure midway is possible even with the all-host preflight and serial
+  application; do not assume automatic rollback. Inspect the recap and
+  guest state before retrying. The playbook is designed for convergent
+  retries, not transactional rollback.
+- PR #8 stays draft until the local plan, approved apply and
+  idempotence validation are completed.
+
+The official config references are
+https://kubernetes.io/docs/setup/production-environment/container-runtimes/
+and https://containerd.org/docs/2.3/cri/config/.
