@@ -61,6 +61,13 @@ class KubernetesDiscoveryTests(unittest.TestCase):
         self.assertEqual(play["hosts"], "sentinel_sandbox")
         self.assertNotIn("become", play)
         self.assertTrue(play["any_errors_fatal"])
+        # Only two read-only checks may be elevated: protected CNI markers
+        # and the root-owned containerd socket. No blanket play-level sudo.
+        elevated = [task["name"] for task in play["tasks"] if task.get("become") is True]
+        self.assertEqual(elevated, [
+            "Inspect Kubernetes initialization markers",
+            "Inspect CRI plugins",
+        ])
         accepted = {
             "ansible.builtin.assert", "ansible.builtin.command",
             "ansible.builtin.stat", "ansible.builtin.copy",
