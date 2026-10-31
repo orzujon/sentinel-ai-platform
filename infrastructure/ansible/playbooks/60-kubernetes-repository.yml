@@ -49,6 +49,31 @@
           - sentinel_extra_k8s_repo.rc == 1
         fail_msg: "BLOCKED: existing Kubernetes repository or unreadable APT source found"
 
+    - name: Inspect whether legacy /etc/apt/sources.list exists
+      ansible.builtin.stat:
+        path: /etc/apt/sources.list
+        follow: false
+      register: sentinel_legacy_sources
+
+    - name: Search legacy sources.list for additional Kubernetes repositories
+      become: true
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -El
+          - 'pkgs[.]k8s[.]io|apt[.]kubernetes[.]io'
+          - /etc/apt/sources.list
+      when: sentinel_legacy_sources.stat.exists
+      register: sentinel_legacy_repo_search
+      changed_when: false
+      failed_when: false
+
+    - name: Block unexpected legacy Kubernetes package sources
+      ansible.builtin.assert:
+        that:
+          - (not sentinel_legacy_sources.stat.exists) or (sentinel_legacy_repo_search.rc | default(2) == 1)
+        fail_msg: "BLOCKED: unknown Kubernetes source or inaccessible legacy APT file"
+
     - name: Download the HTTPS Release key into Ansible memory only
       ansible.builtin.uri:
         url: https://pkgs.k8s.io/core:/stable:/v1.37/deb/Release.key
