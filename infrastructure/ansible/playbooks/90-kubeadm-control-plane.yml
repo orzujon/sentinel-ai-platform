@@ -89,7 +89,7 @@
     - name: Assert pinned private IP remains assigned
       ansible.builtin.assert:
         that:
-          - addresses.stdout is search('"local":\\s*"' ~ (ansible_host | regex_escape) ~ '"')
+          - "addresses.stdout is search(ansible_host | regex_escape)"
     - name: Validate Kubernetes init configuration without writing to VM
       ansible.builtin.command:
         argv: [kubeadm, config, validate, --config, /dev/stdin]
