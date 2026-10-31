@@ -39,6 +39,12 @@ jobs:
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/50-kubernetes-package-source-plan.yml
       - name: Validate Stage 4.3.2 approval gated signed APT source playbook syntax
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/60-kubernetes-repository.yml
+      - name: Validate Stage 4.3.2 installation plan syntax
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/70-kubernetes-install-plan.yml
+      - name: Validate Stage 4.3.2 approval-gated install syntax
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/80-kubernetes-package-install.yml
+      - name: Compile Python management runner
+        run: python -m py_compile infrastructure/ansible/run_readiness.py
       - name: Execute Level 1 static package tests
         run: python -m unittest discover -s infrastructure/level1/tests -p 'test_*.py' -v
       - name: Demonstrate read-only sample plan
