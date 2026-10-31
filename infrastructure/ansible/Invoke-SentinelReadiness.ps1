@@ -12,7 +12,9 @@ param(
     [switch]$RebootValidate,
     [string]$RebootApprovalToken,
     [switch]$DiscoverKubernetes,
-    [switch]$PlanKubernetesPackages
+    [switch]$PlanKubernetesPackages,
+    [switch]$ConfigureKubernetesRepo,
+    [string]$RepositoryApprovalToken
 )
 
 Set-StrictMode -Version Latest
@@ -25,9 +27,17 @@ $selectedModeCount = [int]$PlanBaseline.IsPresent +
     [int]$ApplyBaseline.IsPresent +
     [int]$RebootValidate.IsPresent +
     [int]$DiscoverKubernetes.IsPresent +
-    [int]$PlanKubernetesPackages.IsPresent
+    [int]$PlanKubernetesPackages.IsPresent +
+    [int]$ConfigureKubernetesRepo.IsPresent
 if ($selectedModeCount -gt 1) {
     throw 'BLOCKED: choose exactly one Stage 4.2 or 4.3 mode'
+}
+if ($ConfigureKubernetesRepo.IsPresent) {
+    if ($RepositoryApprovalToken -cne 'CONFIGURE_SENTINEL_STAGE432_K8S_REPO') {
+        throw 'BLOCKED: separate Stage 4.3.2 repository approval is missing'
+    }
+} elseif ($RepositoryApprovalToken) {
+    throw 'BLOCKED: repository approval token only applies to -ConfigureKubernetesRepo'
 }
 if ($RebootValidate.IsPresent) {
     if ($RebootApprovalToken -cne 'REBOOT_SENTINEL_STAGE42_SANDBOX') {
@@ -95,6 +105,8 @@ if ($ApplyBaseline.IsPresent) {
     Write-Host 'APPROVED APPLY MODE: Stage 4.2 will change the sandbox guests.'
 } elseif ($RebootValidate.IsPresent) {
     Write-Host 'APPROVED REBOOT MODE: Stage 4.2 will reboot both sandbox VMs sequentially.'
+} elseif ($ConfigureKubernetesRepo.IsPresent) {
+    Write-Host 'APPROVED REPOSITORY MODE: Stage 4.3.2 will add the signed Kubernetes APT source and refresh package indexes. Kubernetes packages will not be installed.'
 } else {
     Write-Host 'READ-ONLY MODE: no guest configuration will be changed.'
 }
@@ -124,6 +136,9 @@ if ($DiscoverKubernetes.IsPresent) {
 if ($PlanKubernetesPackages.IsPresent) {
     $wslArgs += '--plan-kubernetes-packages'
 }
+if ($ConfigureKubernetesRepo.IsPresent) {
+    $wslArgs += @('--configure-kubernetes-repo', '--repository-approval-token', $RepositoryApprovalToken)
+}
 & wsl.exe @wslArgs
 $exitCode = $LASTEXITCODE
 if ($exitCode -ne 0) {
@@ -137,6 +152,8 @@ if ($ApplyBaseline.IsPresent) {
     Write-Host 'PASS: Stage 4.3.1 Kubernetes discovery completed without modifying guests.'
 } elseif ($PlanKubernetesPackages.IsPresent) {
     Write-Host 'PASS: Stage 4.3.2 read-only Kubernetes package-source plan complete.'
+} elseif ($ConfigureKubernetesRepo.IsPresent) {
+    Write-Host 'PASS: Stage 4.3.2 signed Kubernetes APT repository configured. Kubernetes not installed.'
 } elseif ($PlanBaseline.IsPresent) {
     Write-Host 'PASS: Stage 4.2 read-only baseline plan complete.'
 } else {
