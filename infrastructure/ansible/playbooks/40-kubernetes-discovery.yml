@@ -1,0 +1,154 @@
+---
+# Sentinel Stage 4.3.1 — discovery only, NEVER initializes Kubernetes.
+# Every guest task uses a read-only Ansible module. The only copy operation
+# delegates to localhost to write a 0600 JSON report outside the public repo.
+- name: Discover kubeadm prerequisites on validated isolated guests
+  hosts: sentinel_sandbox
+  gather_facts: true
+  any_errors_fatal: true
+  serial: 1
+  tasks:
+    - name: Require expected Ubuntu guest platform
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '26.04'
+          - ansible_facts['architecture'] == 'x86_64'
+          - ansible_facts['service_mgr'] == 'systemd'
+        fail_msg: "BLOCKED: unsupported guest platform"
+
+    - name: Inspect Kubernetes initialization markers
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /etc/kubernetes/admin.conf
+        - /etc/kubernetes/kubelet.conf
+        - /etc/kubernetes/manifests/kube-apiserver.yaml
+        - /var/lib/kubelet/config.yaml
+        - /etc/cni/net.d/10-flannel.conflist
+      register: sentinel_k8s_markers
+
+    - name: Inspect existing Kubernetes APT package candidates
+      ansible.builtin.command:
+        argv: [apt-cache, policy, "{{ item }}"]
+      loop: [kubeadm, kubelet, kubectl]
+      register: sentinel_k8s_policy
+      changed_when: false
+
+    - name: Inspect installed Kubernetes package revisions
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Version}", "{{ item }}"]
+      loop: [kubeadm, kubelet, kubectl]
+      register: sentinel_k8s_installed
+      changed_when: false
+      failed_when: false
+
+    - name: Inspect installed containerd package revision
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Version}", containerd]
+      register: sentinel_containerd_installed
+      changed_when: false
+      failed_when: false
+
+    - name: Inspect containerd runtime state without modifying it
+      ansible.builtin.command:
+        argv: [systemctl, is-active, containerd]
+      register: sentinel_containerd_service
+      changed_when: false
+      failed_when: false
+
+    - name: Inspect CRI plugins
+      ansible.builtin.command:
+        argv: [ctr, plugins, ls]
+      register: sentinel_cri_plugins
+      changed_when: false
+      failed_when: false
+
+    - name: Inspect containerd CRI socket existence
+      ansible.builtin.stat:
+        path: /run/containerd/containerd.sock
+        follow: false
+      register: sentinel_cri_socket
+
+    - name: Inspect kernel IPv4 forwarding
+      ansible.builtin.command:
+        argv: [sysctl, -n, net.ipv4.ip_forward]
+      register: sentinel_ip_forwarding
+      changed_when: false
+
+    - name: Inspect active swap without changing it
+      ansible.builtin.command:
+        argv: [cat, /proc/swaps]
+      register: sentinel_swap
+      changed_when: false
+
+    - name: Inspect actual network interfaces and addresses
+      ansible.builtin.command:
+        argv: [ip, -j, -4, addr, show]
+      register: sentinel_addresses
+      changed_when: false
+
+    - name: Inspect Linux IPv4 routing table
+      ansible.builtin.command:
+        argv: [ip, -j, -4, route, show, table, all]
+      register: sentinel_routes
+      changed_when: false
+
+    - name: Inspect listening TCP endpoints, not firewall rules
+      ansible.builtin.command:
+        argv: [ss, -H, -ltn]
+      register: sentinel_listeners
+      changed_when: false
+
+    - name: Inspect existing kubelet service
+      ansible.builtin.command:
+        argv: [systemctl, is-active, kubelet]
+      register: sentinel_kubelet_service
+      changed_when: false
+      failed_when: false
+
+    - name: Require approved private report directory
+      ansible.builtin.assert:
+        that:
+          - sentinel_report_root is defined
+          - sentinel_report_root is string
+          - sentinel_report_root.startswith('/home/')
+        fail_msg: "BLOCKED: private controller report path is missing"
+
+    - name: Save discovery report on WSL controller only
+      ansible.builtin.copy:
+        dest: "{{ sentinel_report_root }}/{{ inventory_hostname }}.json"
+        mode: '0600'
+        content: >-
+          {{
+            {
+              'distribution': ansible_facts['distribution'],
+              'distributionVersion': ansible_facts['distribution_version'],
+              'architecture': ansible_facts['architecture'],
+              'k8sMarkers': sentinel_k8s_markers.results | map(attribute='stat.exists') | list,
+              'kubeadmPolicyRaw': sentinel_k8s_policy.results[0].stdout,
+              'kubeletPolicyRaw': sentinel_k8s_policy.results[1].stdout,
+              'kubectlPolicyRaw': sentinel_k8s_policy.results[2].stdout,
+              'kubeadmInstalled': (sentinel_k8s_installed.results[0].stdout if sentinel_k8s_installed.results[0].rc == 0 else 'not-installed'),
+              'kubeletInstalled': (sentinel_k8s_installed.results[1].stdout if sentinel_k8s_installed.results[1].rc == 0 else 'not-installed'),
+              'kubectlInstalled': (sentinel_k8s_installed.results[2].stdout if sentinel_k8s_installed.results[2].rc == 0 else 'not-installed'),
+              'containerdInstalled': (sentinel_containerd_installed.stdout if sentinel_containerd_installed.rc == 0 else 'not-installed'),
+              'containerdService': sentinel_containerd_service.stdout | trim,
+              'criPluginsRaw': sentinel_cri_plugins.stdout if sentinel_cri_plugins.rc == 0 else '',
+              'criSocketExists': sentinel_cri_socket.stat.exists,
+              'ipv4Forwarding': sentinel_ip_forwarding.stdout | trim,
+              'swapEntries': (sentinel_swap.stdout_lines | length) - 1,
+              'addressesRaw': sentinel_addresses.stdout,
+              'routesRaw': sentinel_routes.stdout,
+              'tcpListenersRaw': sentinel_listeners.stdout,
+              'kubeletService': sentinel_kubelet_service.stdout | trim
+            } | to_nice_json
+          }}
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Confirm guest inspection was read only
+      ansible.builtin.debug:
+        msg: "STAGE43_GUEST_INSPECTED: read-only commands only; report saved on controller"
