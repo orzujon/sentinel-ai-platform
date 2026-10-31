@@ -289,3 +289,41 @@ Control plane initialization was approved and passed locally on 2026-10-31. Run 
 ### Stage 4.3.4 approved Flannel deployment
 
 After reviewing the exact checksum printed by the read-only plan and validating the release manifest's images and routing mode, operator approval may be provided via -ApplyFlannel, -FlannelSha256 with the full lowercase 64-hex checksum, and -FlannelApprovalToken APPLY_SENTINEL_STAGE434_FLANNEL_02810. The apply playbook checks /readyz, refuses an existing DaemonSet, verifies the fetched manifest against the operator-pinned SHA256, applies through kubectl stdin, waits for rollout, and verifies node Ready. Apply mode modifies the cluster. Do not run without reviewing the plan first. On partial failure stop and inspect state; do not reset or blindly rerun.
+
+## Level 1 unified desired-state entry point (initial Flannel reconciliation)
+
+The operator should no longer copy the Flannel checksum between plan and
+apply. It is stored in the reviewed, version-controlled
+`infrastructure/ansible/desired-state/lab.yml` lock file, separate from
+the private environment inventory and credentials.
+
+Single command for automatic inspection (no mutation):
+
+```powershell
+.\infrastructure\ansible\Invoke-SentinelReadiness.ps1 `
+  -ConfigRepo "C:\Sentinel\config-readonly" -Reconcile
+```
+
+Single approved deployment/reconciliation command:
+
+```powershell
+.\infrastructure\ansible\Invoke-SentinelReadiness.ps1 `
+  -ConfigRepo "C:\Sentinel\config-readonly" -Reconcile `
+  -ReconcileApprovalToken "DEPLOY_SENTINEL_LEVEL1_LAB"
+```
+
+The pipeline uses private inventory and SSH trust, reads pinned desired state,
+downloads and checks the release once on the WSL controller, retains its exact
+bytes in private temporary storage during the run, and supplies that artifact
+to Ansible. Ansible verifies its digest again, checks API readiness and
+existing Flannel state, applies only when absent and explicitly approved,
+checks rollout and node readiness, and annotates the release checksum.
+A repeat run with matching checksum verifies rollout and Ready without apply.
+An existing unmanaged or mismatched Flannel release blocks; there is no silent
+overwrite. The final private audit includes release, mode, result and exit code.
+
+**Limitations:** This initial orchestrated reconciler covers the already-built
+control plane and Flannel first install/reverification. It does not yet provision
+fresh VMs through an end-to-end orchestrator, join the worker, or perform CNI
+upgrades/rollbacks. Desired-state changes to an existing Flannel release are
+blocked until a reviewed upgrade and recovery flow is implemented.
