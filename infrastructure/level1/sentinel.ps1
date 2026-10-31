@@ -12,7 +12,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('preflight','runs','image-discover','prepare-images','verify-image','infra-plan','infra-provision','infra-verify')]
+    [ValidateSet('preflight','runs','image-discover','prepare-images','verify-image','infra-plan','infra-provision','infra-verify','bootstrap-plan')]
     [string]$Command = 'preflight',
     [string]$ConfigPath = (Join-Path $PSScriptRoot 'config\lab.json')
 )
@@ -20,6 +20,22 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Stage 5 entry point: classify existing or clean sandbox, with no mutation.
+if ($Command -eq 'bootstrap-plan') {
+    if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { throw "Configuration missing: $ConfigPath" }
+    $bootstrapConfig = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+    $bootstrapRun = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8)
+    $bootstrapDir = Join-Path (Join-Path $PSScriptRoot 'runs') $bootstrapRun
+    Import-Module (Join-Path $PSScriptRoot 'src\Sentinel.Bootstrap.psm1') -Force
+    $bootstrapResult = Invoke-SentinelBootstrapPlan -Config $bootstrapConfig -RunDirectory $bootstrapDir -ConfigPath $ConfigPath
+    Write-Host "Sentinel Level 1 Stage 5 bootstrap plan: $($bootstrapResult.Result)"
+    Write-Host "Route: $($bootstrapResult.Route)"
+    Write-Host "Reason: $($bootstrapResult.Reason)"
+    Write-Host "Report: $($bootstrapResult.ReportPath)"
+    Write-Host "No Hyper-V or guest configuration was modified."
+    if ($bootstrapResult.Result -eq 'BLOCKED') { exit 2 }
+    exit 0
+}
 # SENTINEL_STAGE2_DISPATCH_V1
 if ($Command -in @('image-discover', 'prepare-images', 'verify-image')) {
     if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { throw "Configuration missing: $ConfigPath" }
@@ -69,6 +85,7 @@ if ($Command -eq 'runs') {
             $report = Join-Path $_.FullName 'preflight.json'
             if (-not (Test-Path -LiteralPath $report)) { $report = Join-Path $_.FullName 'image.json' }
             if (-not (Test-Path -LiteralPath $report)) { $report = Join-Path $_.FullName 'infra.json' }
+            if (-not (Test-Path -LiteralPath $report)) { $report = Join-Path $_.FullName 'bootstrap-plan.json' }
             if (Test-Path -LiteralPath $report) {
                 $entry = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
                 [pscustomobject]@{ RunId = $entry.runId; Result = $entry.result; DurationSeconds = $entry.durationSeconds; Report = $report }
