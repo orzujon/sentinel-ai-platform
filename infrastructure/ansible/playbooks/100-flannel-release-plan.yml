@@ -1,0 +1,69 @@
+---
+# Stage 4.3.4 — validate running API and inspect pinned release asset only.
+# Never applies any manifest; keeps external fetched files out of public Git.
+- name: Stage 4.3.4 verify API and download pinned Flannel release for review
+  hosts: sentinel_control_plane
+  gather_facts: false
+  any_errors_fatal: true
+  become: true
+  vars:
+    sentinel_flannel_url: https://github.com/flannel-io/flannel/releases/download/v0.28.10/kube-flannel.yml
+  tasks:
+    - name: Confirm admin kubeconfig is present
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+        follow: false
+      register: config
+    - name: Require existing initialized control plane
+      ansible.builtin.assert:
+        that:
+          - config.stat.isreg | default(false)
+        fail_msg: Control plane is not initialized
+    - name: Check Kubernetes API via existing admin kubeconfig
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, --raw=/readyz]
+      changed_when: false
+      register: api
+    - name: Require API ready before Flannel installation
+      ansible.builtin.assert:
+        that:
+          - api.stdout | trim == 'ok'
+    - name: Inspect existing Flannel DaemonSet
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, -n, kube-flannel, get, daemonset, kube-flannel-ds, --ignore-not-found, -o, name]
+      changed_when: false
+      register: existing
+    - name: Refuse to overwrite existing Flannel deployment
+      ansible.builtin.assert:
+        that:
+          - existing.stdout | trim == ''
+    - name: Fetch exact release manifest into memory over validated TLS
+      ansible.builtin.uri:
+        url: "{{ sentinel_flannel_url }}"
+        method: GET
+        follow_redirects: all
+        validate_certs: true
+        return_content: true
+        status_code: 200
+        timeout: 45
+      delegate_to: localhost
+      become: false
+      register: manifest
+      changed_when: false
+      no_log: true
+    - name: Require plausible release YAML and expected Pod CIDR
+      ansible.builtin.assert:
+        that:
+          - manifest.content | length > 1000
+          - manifest.content | length < 250000
+          - "'10.244.0.0/16' in manifest.content"
+          - "'ghcr.io/flannel-io/flannel:v0.28.10' in manifest.content"
+          - "'kind: DaemonSet' in manifest.content"
+        fail_msg: Pinned release manifest does not match expected content; review upstream release
+    - name: Record manifest SHA256 without deploying
+      ansible.builtin.debug:
+        msg:
+          - "STAGE434_PLAN_READY: API ready; pinned Flannel v0.28.10 release manifest inspected"
+          - "MANIFEST_SHA256={{ manifest.content | hash('sha256') }}"
+          - "MANIFEST_SOURCE={{ sentinel_flannel_url }}"
+          - "NO_APPLY: manifest not deployed; checksum must be explicitly reviewed before guarded apply"
