@@ -92,4 +92,21 @@ Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Argumen
     PlanKubernetesInstall = $true
     InstallKubernetesPackages = $true
 }
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    PlanControlPlane = $true
+}
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    InitControlPlane = $true
+    ControlPlaneApprovalToken = "INITIALIZE_SENTINEL_STAGE433_CONTROL_PLANE"
+}
+Assert-BlockedWith -Contains "separate Stage 4.3.3 initialization approval missing" -Arguments @{
+    InitControlPlane = $true
+}
+Assert-BlockedWith -Contains "initialization token only valid" -Arguments @{
+    ControlPlaneApprovalToken = "INITIALIZE_SENTINEL_STAGE433_CONTROL_PLANE"
+}
+Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Arguments @{
+    PlanControlPlane = $true
+    InitControlPlane = $true
+}
 Write-Host "PASS: Stage 4.2 mode and approval preflight smoke tests"
