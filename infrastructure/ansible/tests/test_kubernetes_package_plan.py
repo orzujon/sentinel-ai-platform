@@ -71,6 +71,41 @@ class KubernetesSourcePlanTests(unittest.TestCase):
         with self.assertRaises(Stage4Blocked):
             validate_kubernetes_package_source_plan(data)
 
+    def test_repo_install_is_separate_approved_aptonly_playbook(self):
+        playbook = ROOT / "playbooks" / "60-kubernetes-repository.yml"
+        text = playbook.read_text(encoding="utf-8")
+        plays = yaml.safe_load(text)
+        self.assertEqual(len(plays), 2)
+        self.assertTrue(all(p["hosts"] == "sentinel_sandbox" for p in plays))
+        self.assertTrue(all(p["any_errors_fatal"] for p in plays))
+        self.assertEqual(plays[1]["serial"], 1)
+        allowed = {
+            "ansible.builtin.assert", "ansible.builtin.command",
+            "ansible.builtin.stat", "ansible.builtin.uri",
+            "ansible.builtin.file", "ansible.builtin.copy",
+            "ansible.builtin.apt", "ansible.builtin.debug",
+        }
+        tasks = [t for p in plays for t in p["tasks"]]
+        for task in tasks:
+            modules = {k for k in task if k.startswith("ansible.builtin.")}
+            self.assertEqual(len(modules), 1, task["name"])
+            self.assertTrue(modules.issubset(allowed), task["name"])
+            self.assertNotIn("ansible.builtin.shell", task)
+            self.assertNotIn("ansible.builtin.reboot", task)
+        self.assertIn("sentinel_repo_bootstrap_approved is sameas true", text)
+        self.assertIn("DE15B14486CD377B9E876E1A234654DA9A296436", text)
+        self.assertIn("signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg", text)
+        self.assertNotIn("apt-key", text)
+        self.assertNotIn("kubeadm init", text)
+        self.assertNotIn("kubeadm join", text)
+        for task in tasks:
+            if task.get("delegate_to") == "localhost":
+                self.assertIs(task["become"], False)
+                self.assertIs(task["no_log"], True)
+            if "ansible.builtin.apt" in task:
+                self.assertIs(task["ansible.builtin.apt"]["update_cache"], True)
+                self.assertNotIn("name", task["ansible.builtin.apt"])
+
     def test_discovery_playbook_remote_modules_non_mutating(self):
         plays = yaml.safe_load(PLAYBOOK.read_text(encoding="utf-8"))
         self.assertEqual(len(plays), 1)
