@@ -10,7 +10,8 @@ param(
     [switch]$ApplyBaseline,
     [string]$ApprovalToken,
     [switch]$RebootValidate,
-    [string]$RebootApprovalToken
+    [string]$RebootApprovalToken,
+    [switch]$DiscoverKubernetes
 )
 
 Set-StrictMode -Version Latest
@@ -21,9 +22,10 @@ $ErrorActionPreference = 'Stop'
 # Avoid pipeline scalar-unwrapping under Set-StrictMode -Version Latest.
 $selectedModeCount = [int]$PlanBaseline.IsPresent +
     [int]$ApplyBaseline.IsPresent +
-    [int]$RebootValidate.IsPresent
+    [int]$RebootValidate.IsPresent +
+    [int]$DiscoverKubernetes.IsPresent
 if ($selectedModeCount -gt 1) {
-    throw 'BLOCKED: choose plan, apply or reboot validation, not multiple modes'
+    throw 'BLOCKED: choose plan, apply, reboot validation or Kubernetes discovery, not multiple modes'
 }
 if ($RebootValidate.IsPresent) {
     if ($RebootApprovalToken -cne 'REBOOT_SENTINEL_STAGE42_SANDBOX') {
@@ -114,6 +116,9 @@ if ($ApplyBaseline.IsPresent) {
 if ($RebootValidate.IsPresent) {
     $wslArgs += @('--reboot-validate', '--reboot-approval-token', $RebootApprovalToken)
 }
+if ($DiscoverKubernetes.IsPresent) {
+    $wslArgs += '--discover-kubernetes'
+}
 & wsl.exe @wslArgs
 $exitCode = $LASTEXITCODE
 if ($exitCode -ne 0) {
@@ -123,6 +128,8 @@ if ($ApplyBaseline.IsPresent) {
     Write-Host 'PASS: Stage 4.2 approved apply returned successfully. Check recap for changes.'
 } elseif ($RebootValidate.IsPresent) {
     Write-Host 'PASS: Stage 4.2 reboot persistence verification completed on both sandbox guests.'
+} elseif ($DiscoverKubernetes.IsPresent) {
+    Write-Host 'PASS: Stage 4.3.1 Kubernetes discovery completed without modifying guests.'
 } elseif ($PlanBaseline.IsPresent) {
     Write-Host 'PASS: Stage 4.2 read-only baseline plan complete.'
 } else {
