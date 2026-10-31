@@ -330,6 +330,9 @@ def main(argv=None) -> int:
                         help="Explicitly approved SHA256-gated Flannel deployment")
     parser.add_argument("--flannel-approval-token", default=None)
     parser.add_argument("--flannel-sha256", default=None)
+    parser.add_argument("--reconcile", action="store_true",
+                        help="Single desired-state verification and Flannel reconciliation")
+    parser.add_argument("--reconcile-approval-token", default=None)
     args = parser.parse_args(argv)
 
     try:
@@ -339,9 +342,14 @@ def main(argv=None) -> int:
             bool(args.plan_kubernetes_packages), bool(args.configure_kubernetes_repo),
             bool(args.plan_kubernetes_install), bool(args.install_kubernetes_packages),
             bool(args.plan_control_plane), bool(args.init_control_plane),
-            bool(args.plan_flannel), bool(args.apply_flannel),
+            bool(args.plan_flannel), bool(args.apply_flannel), bool(args.reconcile),
         )) > 1:
             raise Stage4Blocked("Choose exactly one Stage 4.2 or 4.3 mode")
+        if args.reconcile:
+            if args.reconcile_approval_token not in (None, "DEPLOY_SENTINEL_LEVEL1_LAB"):
+                raise Stage4Blocked("Invalid environment-scoped Level 1 deployment approval")
+        elif args.reconcile_approval_token is not None:
+            raise Stage4Blocked("Reconcile approval only applies to desired-state reconciliation")
         if args.apply_flannel:
             if args.flannel_approval_token != "APPLY_SENTINEL_STAGE434_FLANNEL_02810":
                 raise Stage4Blocked("Missing separate Flannel deployment approval")
@@ -558,6 +566,17 @@ def main(argv=None) -> int:
                     "networking survived reboot on all sandbox guests",
                     flush=True,
                 )
+        if args.reconcile:
+            if len(machines) != 2 or {m["role"] for m in machines} != {"control-plane", "worker"}:
+                raise Stage4Blocked("Desired-state reconciliation requires the pinned two-node sandbox")
+            reconciler = Path(__file__).resolve().parent / "reconcile.py"
+            args_reconcile = [sys.executable, str(reconciler), "--inventory", str(inventory_path),
+                              "--environment", args.environment,
+                              "--mode", "apply" if args.reconcile_approval_token else "plan"]
+            if args.reconcile_approval_token:
+                args_reconcile.append("--approved")
+            checked_command(args_reconcile, stage="Level 1 Flannel desired-state reconciliation")
+            print("SENTINEL_RECONCILED: review the private audit and Kubernetes node readiness", flush=True)
         if args.apply_flannel:
             if len(machines) != 2 or {m["role"] for m in machines} != {"control-plane", "worker"}:
                 raise Stage4Blocked("Flannel deployment requires pinned two-node sandbox")
