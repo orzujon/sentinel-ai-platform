@@ -285,3 +285,7 @@ already-installed nodes. Use the new `-PlanControlPlane` mode.
 ## Stage 4.3.4 — pinned Flannel release plan
 
 Control plane initialization was approved and passed locally on 2026-10-31. Run the -PlanFlannel switch through Invoke-SentinelReadiness.ps1 with the existing -ConfigRepo option. It verifies Kubernetes /readyz from the control-plane kubeconfig, checks that the Flannel DaemonSet does not yet exist, fetches the exact v0.28.10 release asset over TLS and prints SHA256 for operator review. This mode DOES NOT deploy anything. Review asset image references and interface selection before authorizing a separately gated deployment.
+
+### Stage 4.3.4 approved Flannel deployment
+
+After reviewing the exact checksum printed by the read-only plan and validating the release manifest's images and routing mode, operator approval may be provided via -ApplyFlannel, -FlannelSha256 with the full lowercase 64-hex checksum, and -FlannelApprovalToken APPLY_SENTINEL_STAGE434_FLANNEL_02810. The apply playbook checks /readyz, refuses an existing DaemonSet, verifies the fetched manifest against the operator-pinned SHA256, applies through kubectl stdin, waits for rollout, and verifies node Ready. Apply mode modifies the cluster. Do not run without reviewing the plan first. On partial failure stop and inspect state; do not reset or blindly rerun.
