@@ -130,4 +130,18 @@ Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Argumen
     PlanFlannel = $true
     ApplyFlannel = $true
 }
+Assert-BlockedWith -Contains "invalid Level 1 deployment approval" -Arguments @{
+    Reconcile = $true
+    ReconcileApprovalToken = "BAD_APPROVAL"
+}
+Assert-BlockedWith -Contains "deployment approval only valid" -Arguments @{
+    ReconcileApprovalToken = "DEPLOY_SENTINEL_LEVEL1_LAB"
+}
+Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Arguments @{
+    Reconcile = $true
+    PlanFlannel = $true
+}
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    Reconcile = $true
+}
 Write-Host "PASS: Stage 4.2 mode and approval preflight smoke tests"
