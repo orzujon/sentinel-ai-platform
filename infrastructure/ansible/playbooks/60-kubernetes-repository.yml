@@ -32,12 +32,12 @@
         fail_msg: "BLOCKED: existing/partial Kubernetes APT source or keyring needs manual review"
 
     - name: Search for additional Kubernetes package sources
+      become: true
       ansible.builtin.command:
         argv:
           - grep
           - -REl
           - 'pkgs[.]k8s[.]io|apt[.]kubernetes[.]io'
-          - /etc/apt/sources.list
           - /etc/apt/sources.list.d
       register: sentinel_extra_k8s_repo
       changed_when: false
