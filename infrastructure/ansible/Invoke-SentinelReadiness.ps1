@@ -16,6 +16,8 @@ param(
     [switch]$ConfigureKubernetesRepo,
     [switch]$PlanKubernetesInstall,
     [switch]$InstallKubernetesPackages,
+    [switch]$Reconcile,
+    [string]$ReconcileApprovalToken,
     [switch]$PlanFlannel,
     [switch]$ApplyFlannel,
     [string]$FlannelApprovalToken,
@@ -44,9 +46,17 @@ $selectedModeCount = [int]$PlanBaseline.IsPresent +
     [int]$PlanControlPlane.IsPresent +
     [int]$InitControlPlane.IsPresent +
     [int]$PlanFlannel.IsPresent +
-    [int]$ApplyFlannel.IsPresent
+    [int]$ApplyFlannel.IsPresent +
+    [int]$Reconcile.IsPresent
 if ($selectedModeCount -gt 1) {
     throw 'BLOCKED: choose exactly one Stage 4.2 or 4.3 mode'
+}
+if ($Reconcile.IsPresent) {
+    if ($ReconcileApprovalToken -and $ReconcileApprovalToken -cne 'DEPLOY_SENTINEL_LEVEL1_LAB') {
+        throw 'BLOCKED: invalid Level 1 deployment approval'
+    }
+} elseif ($ReconcileApprovalToken) {
+    throw 'BLOCKED: deployment approval only valid with -Reconcile'
 }
 if ($ApplyFlannel.IsPresent) {
     if ($FlannelApprovalToken -cne 'APPLY_SENTINEL_STAGE434_FLANNEL_02810') {
@@ -145,6 +155,8 @@ if ($ApplyBaseline.IsPresent) {
     Write-Host 'APPROVED APPLY MODE: Stage 4.2 will change the sandbox guests.'
 } elseif ($RebootValidate.IsPresent) {
     Write-Host 'APPROVED REBOOT MODE: Stage 4.2 will reboot both sandbox VMs sequentially.'
+} elseif ($Reconcile.IsPresent -and $ReconcileApprovalToken) {
+    Write-Host 'APPROVED DESIRED-STATE RECONCILIATION: only declared sandbox resources may change.'
 } elseif ($ApplyFlannel.IsPresent) {
     Write-Host 'APPROVED FLANNEL APPLY: reviewed SHA256-pinned release will modify the control-plane cluster.'
 } elseif ($InitControlPlane.IsPresent) {
@@ -182,6 +194,12 @@ if ($DiscoverKubernetes.IsPresent) {
 if ($PlanKubernetesPackages.IsPresent) {
     $wslArgs += '--plan-kubernetes-packages'
 }
+if ($Reconcile.IsPresent) {
+    $wslArgs += '--reconcile'
+    if ($ReconcileApprovalToken) {
+        $wslArgs += @('--reconcile-approval-token', $ReconcileApprovalToken)
+    }
+}
 if ($ApplyFlannel.IsPresent) {
     $wslArgs += @('--apply-flannel', '--flannel-approval-token', $FlannelApprovalToken, '--flannel-sha256', $FlannelSha256)
 }
@@ -214,6 +232,8 @@ if ($ApplyBaseline.IsPresent) {
     Write-Host 'PASS: Stage 4.2 reboot persistence verification completed on both sandbox guests.'
 } elseif ($DiscoverKubernetes.IsPresent) {
     Write-Host 'PASS: Stage 4.3.1 Kubernetes discovery completed without modifying guests.'
+} elseif ($Reconcile.IsPresent) {
+    Write-Host 'PASS: Level 1 desired-state reconciliation finished.'
 } elseif ($ApplyFlannel.IsPresent) {
     Write-Host 'PASS: Stage 4.3.4 pinned Flannel release applied and control plane Ready.'
 } elseif ($PlanFlannel.IsPresent) {
