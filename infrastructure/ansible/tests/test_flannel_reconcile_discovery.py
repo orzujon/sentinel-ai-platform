@@ -33,9 +33,23 @@ class ReconcileDiscoveryTests(unittest.TestCase):
         self.assertTrue(any("DaemonSet" in c and "sentinel_ds_object" in c for c in clauses))
         self.assertTrue(any("Namespace" in c and "sentinel_namespace_object" in c for c in clauses))
 
-    def test_existing_unmarked_daemonset_remains_blocked(self):
-        gate = self.tasks["Refuse to adopt unmanaged existing workloads or silently change releases"]
-        self.assertIn("not sentinel_existing_ds or sentinel_release_matches", gate["ansible.builtin.assert"]["that"])
+    def test_unmarked_daemonset_requires_zero_manifest_diff(self):
+        diff = self.tasks["Compare unmanaged existing Flannel to exact locked manifest with kubectl diff"]
+        self.assertEqual(diff["ansible.builtin.command"]["argv"][-3:], ["diff", "-f", "/dev/stdin"])
+        self.assertFalse(diff["changed_when"])
+        gate = self.tasks["Refuse to overwrite a different or unverified existing Flannel deployment"]
+        condition = gate["ansible.builtin.assert"]["that"][0]
+        self.assertIn("sentinel_diff.rc", condition)
+        self.assertIn("== 0", condition)
+        adopt = self.tasks["Record whether an identical unmanaged deployment can be safely adopted"]
+        self.assertIn("sentinel_diff.rc", adopt["ansible.builtin.set_fact"]["sentinel_adopt_identical"])
+        annotate = self.tasks["Annotate verified release after successful rollout"]
+        self.assertIn("sentinel_adopt_identical", annotate["when"][-1])
+
+    def test_release_drift_cannot_trigger_apply(self):
+        mutation = self.tasks["Apply exact cached manifest only when absent and approved"]
+        self.assertIn("not sentinel_existing_ds", mutation["when"])
+        self.assertIn("sentinel_reconcile_mode == 'apply'", mutation["when"])
 
 
 if __name__ == "__main__":
