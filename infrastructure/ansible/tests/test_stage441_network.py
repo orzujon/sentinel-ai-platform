@@ -14,7 +14,8 @@ class ActiveNetworkSafety(unittest.TestCase):
         cls.probe = cls.top["Run temporary cross-node probes with guaranteed guarded cleanup"]
 
     def test_approval_and_plan_gate(self):
-        self.assertEqual(self.probe["when"], "sentinel_reconcile_mode == 'apply'")
+        self.assertIn("sentinel_reconcile_mode == 'apply'", self.probe["when"])
+        self.assertIn("sentinel_network_test_enabled | bool", self.probe["when"])
         self.assertIn("sentinel_reconcile_approved", str(self.top["Require explicit lab approval for active diagnostic Pods"]))
 
     def test_owned_namespace_and_cleanup(self):
