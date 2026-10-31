@@ -95,3 +95,29 @@ and Stage 4 trust establishment and Kubernetes first bootstrap still require
 separate guarded steps. Stage 5 will integrate these stages without removing
 existing safety gates, and will require a separate accepted clean-environment
 exercise before claiming full bootstrap support.
+
+
+## Stage 5.2 — One-command existing-environment verification
+
+After the Stage 5.1 planner reports `verify-existing`, the next read-only
+step is:
+
+```powershell
+cd C:\Users\Orzu\projects\sentinel-ai-platform\infrastructure\level1
+.\sentinel.ps1 bootstrap-verify -ConfigRepo "C:\Sentinel\config-readonly"
+```
+
+This first checks the pinned Hyper-V sandbox switch type and host private IP,
+then confirms both VM names, approved storage paths, Running states and both
+network adapters. It then invokes the existing Stage 4 read-only `-Reconcile`
+entry point, which checks trusted SSH identities, Flannel, worker membership
+and cluster health. It never supplies an apply token. A private host-side
+`runs/<id>/bootstrap-verify.json` records each successful gate and the final
+`VERIFIED` or `BLOCKED` result. The nested Stage 4 controller separately
+writes its private reconciliation audit.
+
+The command does **not** create missing VMs, reinstall Kubernetes, reset the
+cluster, or recover persistent application data. It is verification of an
+existing healthy environment; fresh bootstrap from empty VMs remains a
+separate implementation milestone. A live successful `bootstrap-verify` run
+is required before calling Stage 5.2 operationally complete.
