@@ -12,16 +12,17 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('preflight','runs','image-discover','prepare-images','verify-image','infra-plan','infra-provision','infra-verify','bootstrap-plan')]
+    [ValidateSet('preflight','runs','image-discover','prepare-images','verify-image','infra-plan','infra-provision','infra-verify','bootstrap-plan','bootstrap-verify')]
     [string]$Command = 'preflight',
-    [string]$ConfigPath = (Join-Path $PSScriptRoot 'config\lab.json')
+    [string]$ConfigPath = (Join-Path $PSScriptRoot 'config\lab.json'),
+    [string]$ConfigRepo = 'C:\Sentinel\config-readonly'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # Stage 5 entry point: classify existing or clean sandbox, with no mutation.
-if ($Command -eq 'bootstrap-plan') {
+if ($Command -in @('bootstrap-plan','bootstrap-verify')) {
     # Stage 5 planning uses immutable, public-safe sandbox identity and needs
     # no local credentials or legacy Stage 1-3 JSON. A supplied config may
     # supplement future phases, but never overrides the pinned identity.
@@ -53,6 +54,15 @@ if ($Command -eq 'bootstrap-plan') {
     $bootstrapRun = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8)
     $bootstrapDir = Join-Path (Join-Path $PSScriptRoot 'runs') $bootstrapRun
     Import-Module (Join-Path $PSScriptRoot 'src\Sentinel.Bootstrap.psm1') -Force
+    if ($Command -eq 'bootstrap-verify') {
+        $stage4 = Join-Path $PSScriptRoot '..\ansible\Invoke-SentinelReadiness.ps1'
+        $verified = Invoke-SentinelBootstrapVerify -Config $bootstrapConfig -RunDirectory $bootstrapDir -Stage4Script $stage4 -ConfigRepo $ConfigRepo
+        Write-Host "Sentinel Level 1 Stage 5 existing verification: $($verified.Result)"
+        Write-Host "Reason: $($verified.Reason)"
+        Write-Host "Report: $($verified.ReportPath)"
+        if ($verified.Result -ne 'VERIFIED') { exit 2 }
+        exit 0
+    }
     $bootstrapResult = Invoke-SentinelBootstrapPlan -Config $bootstrapConfig -RunDirectory $bootstrapDir -ConfigPath $bootstrapSource
     Write-Host "Sentinel Level 1 Stage 5 bootstrap plan: $($bootstrapResult.Result)"
     Write-Host "Route: $($bootstrapResult.Route)"
@@ -112,6 +122,7 @@ if ($Command -eq 'runs') {
             if (-not (Test-Path -LiteralPath $report)) { $report = Join-Path $_.FullName 'image.json' }
             if (-not (Test-Path -LiteralPath $report)) { $report = Join-Path $_.FullName 'infra.json' }
             if (-not (Test-Path -LiteralPath $report)) { $report = Join-Path $_.FullName 'bootstrap-plan.json' }
+            if (-not (Test-Path -LiteralPath $report)) { $report = Join-Path $_.FullName 'bootstrap-verify.json' }
             if (Test-Path -LiteralPath $report) {
                 $entry = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
                 [pscustomobject]@{ RunId = $entry.runId; Result = $entry.result; DurationSeconds = $entry.durationSeconds; Report = $report }
