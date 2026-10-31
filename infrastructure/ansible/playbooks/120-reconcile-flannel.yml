@@ -57,14 +57,43 @@
       ansible.builtin.set_fact:
         sentinel_existing_ds: "{{ (sentinel_ds_object.kind | default('')) == 'DaemonSet' }}"
         sentinel_release_matches: "{{ sentinel_namespace_object.get('metadata', {}).get('annotations', {}).get('sentinel.ai/manifest-sha256') == sentinel_flannel_sha256 }}"
-    - name: Refuse to adopt unmanaged existing workloads or silently change releases
+    - name: Inspect existing DaemonSet image versions without modifying workloads
+      ansible.builtin.debug:
+        msg:
+          - "FLANNEL_EXISTING: daemonset={{ sentinel_existing_ds }} marker_matches={{ sentinel_release_matches }}"
+          - "FLANNEL_IMAGES: {{ sentinel_ds_object.get('spec', {}).get('template', {}).get('spec', {}).get('containers', []) | map(attribute='image') | list if sentinel_existing_ds else [] }}"
+          - "FLANNEL_INIT_IMAGES: {{ sentinel_ds_object.get('spec', {}).get('template', {}).get('spec', {}).get('initContainers', []) | map(attribute='image') | list if sentinel_existing_ds else [] }}"
+      when: sentinel_existing_ds
+    - name: Compare unmanaged existing Flannel to exact locked manifest with kubectl diff
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", diff, -f, /dev/stdin]
+        stdin: "{{ sentinel_flannel_manifest }}"
+        stdin_add_newline: false
+      register: sentinel_diff
+      changed_when: false
+      failed_when: sentinel_diff.rc not in [0, 1]
+      when:
+        - sentinel_existing_ds
+        - not sentinel_release_matches
+    - name: Explain unmanaged release drift without leaking entire manifest
+      ansible.builtin.debug:
+        msg: "FLANNEL_DRIFT: existing release is not declared as managed and kubectl reports changes. Review actual release before any adoption or upgrade."
+      when:
+        - sentinel_existing_ds
+        - not sentinel_release_matches
+        - sentinel_diff.rc == 1
+    - name: Refuse to overwrite a different or unverified existing Flannel deployment
       ansible.builtin.assert:
         that:
-          - not sentinel_existing_ds or sentinel_release_matches
-        fail_msg: Existing Flannel release differs or is unmanaged; upgrades need a separate reviewed migration workflow
+          - not sentinel_existing_ds or sentinel_release_matches or (sentinel_diff is defined and sentinel_diff.rc | default(2) == 0)
+        fail_msg: "Existing Flannel differs from desired manifest. No modifications made; use a reviewed upgrade or repair process."
+    - name: Record whether an identical unmanaged deployment can be safely adopted
+      ansible.builtin.set_fact:
+        sentinel_adopt_identical: "{{ sentinel_existing_ds and not sentinel_release_matches and sentinel_diff is defined and (sentinel_diff.rc | default(2) == 0) }}"
+
     - name: Display deterministic change plan
       ansible.builtin.debug:
-        msg: "RECONCILE_PLAN: release={{ sentinel_flannel_version }} action={{ 'verify' if sentinel_existing_ds else 'install' }} artifact={{ sentinel_flannel_sha256 }} mode={{ sentinel_reconcile_mode }}"
+        msg: "RECONCILE_PLAN: release={{ sentinel_flannel_version }} action={{ 'adopt-identical' if sentinel_adopt_identical else ('verify' if sentinel_existing_ds else 'install') }} artifact={{ sentinel_flannel_sha256 }} mode={{ sentinel_reconcile_mode }}"
     - name: Require explicit mutation approval before installing
       ansible.builtin.assert:
         that:
@@ -83,7 +112,7 @@
         argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, kube-flannel, rollout, status, ds/kube-flannel-ds, --timeout=180s]
       changed_when: false
       when: sentinel_existing_ds or sentinel_reconcile_mode == 'apply'
-    - name: Annotate release after successful first rollout
+    - name: Annotate verified release after successful rollout
       ansible.builtin.command:
         argv:
           - kubectl
@@ -96,7 +125,7 @@
           - "sentinel.ai/flannel-version={{ sentinel_flannel_version }}"
       when:
         - sentinel_reconcile_mode == 'apply'
-        - not sentinel_existing_ds
+        - not sentinel_existing_ds or sentinel_adopt_identical
     - name: Verify Ready node after deployment or matching release
       ansible.builtin.command:
         argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", get, node, "{{ inventory_hostname }}", -o, "jsonpath={.status.conditions[?(@.type=='Ready')].status}"]
