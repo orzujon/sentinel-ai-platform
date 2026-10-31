@@ -95,7 +95,7 @@ class KubernetesSourcePlanTests(unittest.TestCase):
         self.assertIn("sentinel_repo_bootstrap_approved is sameas true", text)
         self.assertIn("DE15B14486CD377B9E876E1A234654DA9A296436", text)
         self.assertIn("signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg", text)
-        self.assertNotIn("apt-key", text)
+        self.assertNotIn("apt-key add", text)
         self.assertNotIn("kubeadm init", text)
         self.assertNotIn("kubeadm join", text)
         for task in tasks:
