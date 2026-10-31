@@ -255,7 +255,7 @@
             that:
               - (sentinel_cleanup_ns.stdout | from_json).metadata.labels['sentinel.ai/run-id'] == sentinel_netcheck_namespace
               - (sentinel_cleanup_ns.stdout | from_json).metadata.labels['app.kubernetes.io/managed-by'] == 'sentinel-stage44'
-            fail_msg: Refusing to remove diagnostic namespace: owner marker mismatch
+            fail_msg: "Refusing to remove diagnostic namespace: owner marker mismatch"
           when: sentinel_netcheck_created | default(false) | bool
         - name: Remove only this run's owned diagnostic namespace
           ansible.builtin.command:
