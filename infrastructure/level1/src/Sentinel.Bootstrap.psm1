@@ -21,6 +21,27 @@ function Get-SentinelBootstrapRoute {
     return 'blocked-partial'
 }
 
+# Stage 5.3 lifecycle contract, NOT a command executor.
+# Fresh bootstrap is blocked until the bootstrap-only Stage 4 prerequisites and
+# first-time SSH identity pinning have separate live-tested guarded implementations.
+function Get-SentinelFreshBootstrapSteps {
+    [CmdletBinding()]
+    param()
+    return @(
+        [pscustomobject]@{ order=10; id='host-preflight'; runner='level1'; operation='preflight'; approval='none'; ready=$true; requires=@() },
+        [pscustomobject]@{ order=20; id='image-verify'; runner='level1'; operation='verify-image'; approval='none'; ready=$true; requires=@('host-preflight') },
+        [pscustomobject]@{ order=30; id='hyperv-create'; runner='level1'; operation='infra-provision'; approval='interactive-explicit'; ready=$true; requires=@('image-verify') },
+        [pscustomobject]@{ order=40; id='guest-first-trust'; runner='stage5'; operation='pin-new-host-identities'; approval='manual-review'; ready=$false; requires=@('hyperv-create') },
+        [pscustomobject]@{ order=50; id='linux-baseline'; runner='stage4'; operation='ApplyBaseline'; approval='separate-token'; ready=$true; requires=@('guest-first-trust') },
+        [pscustomobject]@{ order=60; id='kubernetes-repository'; runner='stage4'; operation='ConfigureKubernetesRepo'; approval='separate-token'; ready=$true; requires=@('linux-baseline') },
+        [pscustomobject]@{ order=70; id='kubernetes-packages'; runner='stage4'; operation='InstallKubernetesPackages'; approval='separate-token'; ready=$true; requires=@('kubernetes-repository') },
+        [pscustomobject]@{ order=80; id='control-plane-init'; runner='stage4'; operation='InitControlPlane'; approval='separate-token'; ready=$true; requires=@('kubernetes-packages') },
+        [pscustomobject]@{ order=90; id='flannel-install'; runner='stage4'; operation='ApplyFlannel'; approval='separate-token-and-digest'; ready=$true; requires=@('control-plane-init') },
+        [pscustomobject]@{ order=100; id='worker-join'; runner='stage5'; operation='join-fresh-worker'; approval='separate-reviewed-flow'; ready=$false; requires=@('flannel-install') },
+        [pscustomobject]@{ order=110; id='acceptance'; runner='stage4'; operation='Reconcile'; approval='approved-checks'; ready=$true; requires=@('worker-join') }
+    )
+}
+
 function Invoke-SentinelBootstrapPlan {
     [CmdletBinding()]
     param(
@@ -88,6 +109,8 @@ function Invoke-SentinelBootstrapPlan {
         guestMutation = $false
         completeBootstrapSupported = $false
         stages = $stages
+        freshBootstrapSteps = @(Get-SentinelFreshBootstrapSteps)
+        freshBootstrapReady = $false
     }
     $record | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reportPath -Encoding UTF8
     return [pscustomobject]@{ Result=$outcome; Route=$route; Reason=$message; ReportPath=$reportPath }
@@ -170,4 +193,4 @@ function Invoke-SentinelBootstrapVerify {
     }
     return [pscustomobject]@{ Result=$status; Reason=$reason; ReportPath=$report }
 }
-Export-ModuleMember -Function Invoke-SentinelBootstrapPlan, Get-SentinelBootstrapRoute, Assert-SentinelExistingHyperV, Invoke-SentinelBootstrapVerify
+Export-ModuleMember -Function Invoke-SentinelBootstrapPlan, Get-SentinelBootstrapRoute, Assert-SentinelExistingHyperV, Invoke-SentinelBootstrapVerify, Get-SentinelFreshBootstrapSteps
