@@ -71,11 +71,14 @@ def retrieve_verified_release(version: str, digest: str, destination: Path) -> N
 
 
 def reconcile(*, inventory: Path, environment: str, mode: str, approval: bool,
-              state_root: Path, desired_file: Path | None = None) -> Path:
+              state_root: Path, desired_file: Path | None = None,
+              network_test: bool = False) -> Path:
     if mode not in {"plan", "apply"}:
         raise ReconcileError("Invalid reconciliation mode")
     if mode == "apply" and not approval:
         raise ReconcileError("Explicit environment-scoped deployment approval missing")
+    if network_test and (mode != "apply" or not approval):
+        raise ReconcileError("Active networking probes require explicit approved apply mode")
     source = desired_file or (Path(__file__).resolve().parent / "desired-state" / f"{environment}.yml")
     release = load_desired(source, environment)
     state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -99,6 +102,7 @@ def reconcile(*, inventory: Path, environment: str, mode: str, approval: bool,
             "sentinel_flannel_artifact": str(asset),
             "sentinel_netcheck_namespace": "sentinel-netcheck-" + secrets.token_hex(6),
             "sentinel_netcheck_image": "busybox:1.37.0",
+            "sentinel_network_test_enabled": network_test,
         }
         print(f"RECONCILE_TARGET: env={environment} flannel={release['version']} artifact_sha256={release['digest']} mode={mode}", flush=True)
         results = []
@@ -130,11 +134,13 @@ def main() -> int:
     parser.add_argument("--environment", required=True)
     parser.add_argument("--mode", choices=["plan", "apply"], required=True)
     parser.add_argument("--approved", action="store_true")
+    parser.add_argument("--network-test", action="store_true")
     args = parser.parse_args()
     try:
         reconcile(inventory=Path(args.inventory), environment=args.environment,
                   mode=args.mode, approval=args.approved,
-                  state_root=Path.home() / ".local" / "state" / "sentinel")
+                  state_root=Path.home() / ".local" / "state" / "sentinel",
+                  network_test=args.network_test)
     except (OSError, ReconcileError, yaml.YAMLError) as exc:
         parser.exit(2, f"BLOCKED: {exc}\n")
     return 0
