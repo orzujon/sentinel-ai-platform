@@ -61,7 +61,7 @@
       ansible.builtin.assert:
         that:
           - "item.stdout is search('Candidate: 1[.]37[.]2-1[.]1')"
-          - "item.stdout is search('pkgs[.]k8s[.]io/core:/stable:/v1[.]37/deb/')"
+          - "item.stdout is search('https://pkgs[.]k8s[.]io/core:/stable:/v1[.]37/deb/? +Packages')"
       loop: "{{ policies.results }}"
     - name: Simulate exact pinned installation without altering APT
       become: true
