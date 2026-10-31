@@ -87,6 +87,9 @@ jobs:
       - name: Test Stage 5 bootstrap route classification without Hyper-V
         shell: powershell
         run: .\infrastructure\level1\tests\Test-BootstrapPlan.ps1
+      - name: Verify Stage 5.2 read-only existing-environment orchestration contract
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-BootstrapVerify.ps1
       - name: Parse all Level 1 PowerShell modules and verify isolation checks
         shell: powershell
         run: .\infrastructure\level1\tests\Test-StaticSafety.ps1
