@@ -87,6 +87,7 @@ def reconcile(*, inventory: Path, environment: str, mode: str, approval: bool,
         playbooks = [
             ("flannel", Path(__file__).resolve().parent / "playbooks" / "120-reconcile-flannel.yml"),
             ("worker", Path(__file__).resolve().parent / "playbooks" / "130-reconcile-worker.yml"),
+            ("cluster-validation", Path(__file__).resolve().parent / "playbooks" / "140-cluster-validate.yml"),
         ]
         variables = {
             "sentinel_reconcile_mode": mode,
