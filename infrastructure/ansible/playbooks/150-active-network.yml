@@ -16,6 +16,7 @@
       ansible.builtin.assert:
         that:
           - sentinel_reconcile_mode in ['plan', 'apply']
+          - sentinel_network_test_enabled | type_debug == 'bool'
           - sentinel_netcheck_namespace is match('^sentinel-netcheck-[a-f0-9]{12}$')
           - sentinel_cp != sentinel_worker
           - groups['sentinel_control_plane'] | length == 1
@@ -23,13 +24,15 @@
           - sentinel_netcheck_image == 'busybox:1.37.0'
     - name: Report active probe intent without modifying the cluster
       ansible.builtin.debug:
-        msg: "STAGE441_PLAN: mode={{ sentinel_reconcile_mode }} pods=2 nodes={{ sentinel_cp }},{{ sentinel_worker }} scope={{ sentinel_netcheck_namespace }} image={{ sentinel_netcheck_image }}"
+        msg: "STAGE441_PLAN: mode={{ sentinel_reconcile_mode }} enabled={{ sentinel_network_test_enabled }} pods=2 nodes={{ sentinel_cp }},{{ sentinel_worker }} scope={{ sentinel_netcheck_namespace }} image={{ sentinel_netcheck_image }}"
     - name: Require explicit lab approval for active diagnostic Pods
       ansible.builtin.assert:
         that:
           - sentinel_reconcile_mode != 'apply' or (sentinel_reconcile_approved | default(false) | bool)
     - name: Run temporary cross-node probes with guaranteed guarded cleanup
-      when: sentinel_reconcile_mode == 'apply'
+      when:
+        - sentinel_reconcile_mode == 'apply'
+        - sentinel_network_test_enabled | bool
       block:
         - name: Create unique owned diagnostic namespace without altering existing namespaces
           ansible.builtin.command:
