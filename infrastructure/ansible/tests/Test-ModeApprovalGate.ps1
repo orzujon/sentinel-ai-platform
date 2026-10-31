@@ -39,6 +39,10 @@ Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments
     PlanKubernetesPackages = $true
 }
 Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    ConfigureKubernetesRepo = $true
+    RepositoryApprovalToken = "CONFIGURE_SENTINEL_STAGE432_K8S_REPO"
+}
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
     ApplyBaseline = $true
     ApprovalToken = "APPLY_SENTINEL_STAGE42_TO_SANDBOX"
 }
@@ -53,6 +57,16 @@ Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Argumen
 Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Arguments @{
     DiscoverKubernetes = $true
     PlanKubernetesPackages = $true
+}
+Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Arguments @{
+    ConfigureKubernetesRepo = $true
+    PlanKubernetesPackages = $true
+}
+Assert-BlockedWith -Contains "separate Stage 4.3.2 repository approval is missing" -Arguments @{
+    ConfigureKubernetesRepo = $true
+}
+Assert-BlockedWith -Contains "repository approval token only applies to" -Arguments @{
+    RepositoryApprovalToken = "CONFIGURE_SENTINEL_STAGE432_K8S_REPO"
 }
 Assert-BlockedWith -Contains "explicit sandbox reboot approval is missing" -Arguments @{
     RebootValidate = $true
