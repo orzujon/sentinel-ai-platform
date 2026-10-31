@@ -228,8 +228,14 @@ if ($InstallKubernetesPackages.IsPresent) {
 if ($ConfigureKubernetesRepo.IsPresent) {
     $wslArgs += @('--configure-kubernetes-repo', '--repository-approval-token', $RepositoryApprovalToken)
 }
-& wsl.exe @wslArgs
-$exitCode = $LASTEXITCODE
+$priorPreference = $ErrorActionPreference
+try {
+    $ErrorActionPreference = 'Continue'
+    & wsl.exe @wslArgs 2>&1 | ForEach-Object { $_.ToString() }
+    $exitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $priorPreference
+}
 if ($exitCode -ne 0) {
     throw "BLOCKED: Stage 4.1 validation failed (exit $exitCode)"
 }
