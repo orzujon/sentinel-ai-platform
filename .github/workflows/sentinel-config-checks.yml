@@ -55,6 +55,8 @@ jobs:
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/130-reconcile-worker.yml
       - name: Validate Stage 4.4 read-only cluster acceptance playbook
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/140-cluster-validate.yml
+      - name: Validate Stage 4.4.1 approved active networking playbook
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/150-active-network.yml
       - name: Compile Python management runner
         run: python -m py_compile infrastructure/ansible/run_readiness.py infrastructure/ansible/reconcile.py
       - name: Execute Level 1 static package tests
