@@ -314,6 +314,11 @@ def main(argv=None) -> int:
         "--repository-approval-token", default=None,
         help="Separate approval for changing only Kubernetes APT repository and cache"
     )
+    parser.add_argument("--plan-kubernetes-install", action="store_true",
+                        help="Read-only pinned Kubernetes package installation simulation")
+    parser.add_argument("--install-kubernetes-packages", action="store_true",
+                        help="Explicitly approved pinned Kubernetes package installation")
+    parser.add_argument("--install-approval-token", default=None)
     args = parser.parse_args(argv)
 
     try:
@@ -321,8 +326,14 @@ def main(argv=None) -> int:
             bool(args.plan_baseline), bool(args.apply_baseline),
             bool(args.reboot_validate), bool(args.discover_kubernetes),
             bool(args.plan_kubernetes_packages), bool(args.configure_kubernetes_repo),
+            bool(args.plan_kubernetes_install), bool(args.install_kubernetes_packages),
         )) > 1:
             raise Stage4Blocked("Choose exactly one Stage 4.2 or 4.3 mode")
+        if args.install_kubernetes_packages:
+            if args.install_approval_token != "INSTALL_SENTINEL_STAGE432_K8S_1372":
+                raise Stage4Blocked("Missing separate Kubernetes installation approval")
+        elif args.install_approval_token is not None:
+            raise Stage4Blocked("Install approval token only valid in install mode")
         if args.configure_kubernetes_repo:
             if args.repository_approval_token != REPO_BOOTSTRAP_APPROVAL:
                 raise Stage4Blocked("Separate Stage 4.3.2 repository approval is missing")
@@ -522,6 +533,41 @@ def main(argv=None) -> int:
                     "networking survived reboot on all sandbox guests",
                     flush=True,
                 )
+        if args.plan_kubernetes_install or args.install_kubernetes_packages:
+            if len(machines) != 2 or {m["role"] for m in machines} != {"control-plane", "worker"}:
+                raise Stage4Blocked("Kubernetes package installation requires the pinned two-node sandbox")
+            plan = Path(__file__).resolve().parent / "playbooks" / "70-kubernetes-install-plan.yml"
+            install = Path(__file__).resolve().parent / "playbooks" / "80-kubernetes-package-install.yml"
+            checked_command(["ansible-playbook", "-i", str(inventory_path),
+                             "--syntax-check", str(plan)], stage="Kubernetes install plan syntax")
+            report_dir = Path(tempfile.mkdtemp(prefix="k8s-install-plan-", dir=state))
+            checked_command(["ansible-playbook", "-i", str(inventory_path),
+                             "-e", json.dumps({"sentinel_report_root": str(report_dir)}),
+                             str(plan)], stage="Read-only Kubernetes package installation simulation")
+            for machine in machines:
+                report = report_dir / f"{machine['name']}.json"
+                if not report.is_file() or report.is_symlink() or (report.stat().st_mode & 0o077):
+                    raise Stage4Blocked("Missing or insecure package installation simulation")
+                data = json.loads(report.read_text(encoding="utf-8"))
+                if set(data) != {"policies", "simulation", "source"} or len(data["policies"]) != 3:
+                    raise Stage4Blocked("Incomplete package installation plan")
+                if any(parse_apt_candidate(policy) != "1.37.2-1.1" for policy in data["policies"]):
+                    raise Stage4Blocked("Pinned Kubernetes candidate differs on a guest")
+                simulation = data["simulation"]
+                if not isinstance(simulation, str) or not simulation.strip() or re.search(r"(?m)^Rem ", simulation):
+                    raise Stage4Blocked("APT simulation empty or proposes package removal")
+                print(f"Node {machine['role']}: pinned 1.37.2-1.1 candidates; APT simulation passed", flush=True)
+            print(f"PRIVATE_REPORT: {report_dir}", flush=True)
+            if args.install_kubernetes_packages:
+                checked_command(["ansible-playbook", "-i", str(inventory_path),
+                                 "--syntax-check", str(install)], stage="Kubernetes install syntax")
+                checked_command(["ansible-playbook", "-i", str(inventory_path),
+                                 "-e", json.dumps({"sentinel_k8s_install_approved": True,
+                                                   "sentinel_k8s_version": "1.37.2-1.1"}),
+                                 str(install)], stage="Approved Kubernetes package installation")
+                print("STAGE432_INSTALLED: Kubernetes packages installed and held; cluster not initialized", flush=True)
+            else:
+                print("STAGE432_INSTALL_PLAN_READY: read-only plan passed; installation requires separate approval", flush=True)
         if args.discover_kubernetes or args.plan_kubernetes_packages or args.configure_kubernetes_repo:
             if len(machines) != 2 or {m["role"] for m in machines} != {"control-plane", "worker"}:
                 raise Stage4Blocked("Stage 4.3 accepts exactly one control plane and one worker")
