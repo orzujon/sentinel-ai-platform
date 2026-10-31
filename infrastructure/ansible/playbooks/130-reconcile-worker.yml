@@ -178,6 +178,17 @@
       retries: 30
       delay: 6
       when: sentinel_reconcile_mode == 'apply'
+    - name: Inspect registered worker address after reconciliation
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, node, "{{ sentinel_worker_name }}", -o, json]
+      register: worker_record
+      changed_when: false
+      when: sentinel_reconcile_mode == 'apply'
+    - name: Ensure worker reports its configured private IP
+      ansible.builtin.assert:
+        that:
+          - "hostvars[sentinel_worker_name].ansible_host in (worker_record.stdout | from_json).status.addresses | selectattr('type', 'equalto', 'InternalIP') | map(attribute='address') | list"
+      when: sentinel_reconcile_mode == 'apply'
     - name: Confirm control plane and worker node identities are separate
       ansible.builtin.assert:
         that:
