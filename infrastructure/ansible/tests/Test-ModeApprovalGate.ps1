@@ -33,12 +33,19 @@ Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments
     PlanBaseline = $true
 }
 Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    DiscoverKubernetes = $true
+}
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
     ApplyBaseline = $true
     ApprovalToken = "APPLY_SENTINEL_STAGE42_TO_SANDBOX"
 }
-Assert-BlockedWith -Contains "choose plan, apply or reboot validation" -Arguments @{
+Assert-BlockedWith -Contains "choose plan, apply, reboot validation or Kubernetes discovery" -Arguments @{
     PlanBaseline = $true
     RebootValidate = $true
+}
+Assert-BlockedWith -Contains "choose plan, apply, reboot validation or Kubernetes discovery" -Arguments @{
+    ApplyBaseline = $true
+    DiscoverKubernetes = $true
 }
 Assert-BlockedWith -Contains "explicit sandbox reboot approval is missing" -Arguments @{
     RebootValidate = $true
