@@ -210,16 +210,25 @@
           ansible.builtin.command:
             argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, "{{ sentinel_netcheck_namespace }}", exec, probe-worker, --, wget, -q, -T, '8', -O, '-', "http://{{ sentinel_probe_by_name['probe-cp'].status.podIP }}:8080/"]
           changed_when: false
+          retries: 6
+          delay: 3
+          until: sentinel_worker_to_cp.rc == 0
           register: sentinel_worker_to_cp
         - name: Test control-plane to worker direct Pod IP connection
           ansible.builtin.command:
             argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, "{{ sentinel_netcheck_namespace }}", exec, probe-cp, --, wget, -q, -T, '8', -O, '-', "http://{{ sentinel_probe_by_name['probe-worker'].status.podIP }}:8080/"]
           changed_when: false
+          retries: 6
+          delay: 3
+          until: sentinel_cp_to_worker.rc == 0
           register: sentinel_cp_to_worker
         - name: Test Service DNS and ClusterIP HTTP routing from worker Pod
           ansible.builtin.command:
             argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, "{{ sentinel_netcheck_namespace }}", exec, probe-worker, --, wget, -q, -T, '8', -O, '-', "http://probe-service.{{ sentinel_netcheck_namespace }}.svc.cluster.local:8080/"]
           changed_when: false
+          retries: 6
+          delay: 3
+          until: sentinel_worker_service.rc == 0
           register: sentinel_worker_service
         - name: Require exact HTTP response from both directions and Service
           ansible.builtin.assert:
