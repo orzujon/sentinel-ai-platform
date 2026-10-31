@@ -8,7 +8,7 @@
   any_errors_fatal: true
   vars:
     sentinel_kubeconfig: /etc/kubernetes/admin.conf
-    sentinel_flannel_manifest: "{{ lookup('ansible.builtin.file', sentinel_flannel_artifact) }}"
+    sentinel_flannel_manifest: "{{ lookup('ansible.builtin.file', sentinel_flannel_artifact, rstrip=False) }}"
   tasks:
     - name: Require explicit safe reconciliation mode
       ansible.builtin.assert:
@@ -19,7 +19,7 @@
           - sentinel_flannel_artifact.startswith('/home/')
           - sentinel_flannel_manifest | hash('sha256') == sentinel_flannel_sha256
           - "'10.244.0.0/16' in sentinel_flannel_manifest"
-          - "'ghcr.io/flannel-io/flannel:' ~ sentinel_flannel_version in sentinel_flannel_manifest"
+          - "('ghcr.io/flannel-io/flannel:' ~ sentinel_flannel_version) in sentinel_flannel_manifest"
         fail_msg: Desired-state artifact or security parameters failed verification
       no_log: true
     - name: Confirm Kubernetes API readiness
@@ -38,13 +38,13 @@
       register: ds
     - name: Inspect existing Sentinel release marker
       ansible.builtin.command:
-        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", get, namespace, kube-flannel, "--output=jsonpath={.metadata.annotations.sentinel\\.ai/manifest-sha256}", --ignore-not-found]
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", get, namespace, kube-flannel, --ignore-not-found, -o, json]
       changed_when: false
       register: marker
     - name: Determine whether release is already managed
       ansible.builtin.set_fact:
         sentinel_existing_ds: "{{ ds.stdout | trim != '' }}"
-        sentinel_release_matches: "{{ marker.stdout | trim == sentinel_flannel_sha256 }}"
+        sentinel_release_matches: "{{ (marker.stdout | from_json).get('metadata', {}).get('annotations', {}).get('sentinel.ai/manifest-sha256') == sentinel_flannel_sha256 if marker.stdout | trim else false }}"
     - name: Refuse to adopt unmanaged existing workloads or silently change releases
       ansible.builtin.assert:
         that:
