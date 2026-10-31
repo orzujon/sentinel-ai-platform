@@ -1,0 +1,62 @@
+---
+# Stage 4.3.2 — read-only package verification on preapproved sandbox hosts.
+- name: Verify pinned Kubernetes package installation plan
+  hosts: sentinel_sandbox
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require private reporting location
+      ansible.builtin.assert:
+        that:
+          - sentinel_report_root is defined
+          - sentinel_report_root.startswith('/home/')
+    - name: Inspect configured signed repository and keyring
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /etc/apt/sources.list.d/kubernetes.list
+        - /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      register: repo_files
+    - name: Require existing regular repository files
+      ansible.builtin.assert:
+        that:
+          - repo_files.results | map(attribute='stat.isreg') | list == [true, true]
+    - name: Inspect exact repository definition
+      ansible.builtin.command: cat /etc/apt/sources.list.d/kubernetes.list
+      changed_when: false
+      register: source
+    - name: Require exact approved signed source
+      ansible.builtin.assert:
+        that:
+          - source.stdout == 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.37/deb/ /'
+    - name: Inspect installed Kubernetes packages
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Status} ${Version}", "{{ item }}"]
+      loop: [kubeadm, kubelet, kubectl]
+      changed_when: false
+      failed_when: false
+      register: installed
+    - name: Require packages absent for first installation
+      ansible.builtin.assert:
+        that:
+          - installed.results | map(attribute='rc') | list == [1, 1, 1]
+        fail_msg: Existing Kubernetes package state needs separate review
+    - name: Read APT candidate policies
+      ansible.builtin.command:
+        argv: [apt-cache, policy, "{{ item }}"]
+      loop: [kubeadm, kubelet, kubectl]
+      changed_when: false
+      register: policies
+    - name: Simulate exact pinned installation without altering APT
+      become: true
+      ansible.builtin.command:
+        argv: [apt-get, -s, install, --no-install-recommends, "kubeadm=1.37.2-1.1", "kubelet=1.37.2-1.1", "kubectl=1.37.2-1.1"]
+      changed_when: false
+      register: simulation
+    - name: Save private per-host package plan
+      ansible.builtin.copy:
+        dest: "{{ sentinel_report_root }}/{{ inventory_hostname }}.json"
+        mode: '0600'
+        content: "{{ {'policies': policies.results | map(attribute='stdout') | list, 'simulation': simulation.stdout, 'source': source.stdout} | to_nice_json }}"
+      delegate_to: localhost
