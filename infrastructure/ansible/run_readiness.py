@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import ipaddress
 import os
 from pathlib import Path
 import re
@@ -102,6 +103,124 @@ def parse_apt_candidate(policy: str) -> str | None:
     return version
 
 
+# Stage 4.3 discovery is intentionally independent of the baseline apply.
+# The proposed Pod and Service CIDRs are reviewed candidates, NOT deployed state.
+STAGE43_POD_CIDR = ipaddress.ip_network("10.244.0.0/16")
+STAGE43_SERVICE_CIDR = ipaddress.ip_network("10.96.0.0/12")
+STAGE43_CONTROL_PORTS = {6443, 2379, 2380, 10250, 10257, 10259}
+
+
+def parse_listen_ports(ss_output: str) -> set[int]:
+    """Parse only the local endpoint from ss -H -ltn, never infer remote ports."""
+    if not isinstance(ss_output, str) or len(ss_output) > 120_000:
+        raise Stage4Blocked("Invalid local TCP socket inspection output")
+    found: set[int] = set()
+    for line in ss_output.splitlines():
+        columns = line.split()
+        if len(columns) < 5 or columns[0] != "LISTEN":
+            raise Stage4Blocked("Unexpected listening socket record")
+        local = columns[3]
+        port = local.rsplit(":", 1)[-1]
+        if not port.isdigit() or not 0 <= int(port) <= 65535:
+            raise Stage4Blocked("Unexpected local TCP port")
+        found.add(int(port))
+    return found
+
+
+def parse_ip_routes(route_data: str) -> list[ipaddress.IPv4Network]:
+    if not isinstance(route_data, str) or len(route_data) > 120_000:
+        raise Stage4Blocked("Invalid IPv4 route inspection output")
+    entries = json.loads(route_data)
+    if not isinstance(entries, list):
+        raise Stage4Blocked("IPv4 routing table must be a JSON list")
+    networks = []
+    for route in entries:
+        if not isinstance(route, dict):
+            raise Stage4Blocked("Malformed IPv4 route")
+        dst = route.get("dst", "default")
+        if dst == "default":
+            continue
+        if not isinstance(dst, str):
+            raise Stage4Blocked("Malformed IPv4 route destination")
+        networks.append(ipaddress.ip_network(dst, strict=False))
+    return networks
+
+
+def parse_host_addresses(address_data: str) -> set[ipaddress.IPv4Address]:
+    if not isinstance(address_data, str) or len(address_data) > 120_000:
+        raise Stage4Blocked("Invalid guest interface inspection output")
+    interfaces = json.loads(address_data)
+    if not isinstance(interfaces, list):
+        raise Stage4Blocked("Guest IP interfaces must be a JSON list")
+    addresses: set[ipaddress.IPv4Address] = set()
+    for interface in interfaces:
+        if not isinstance(interface, dict) or not isinstance(interface.get("addr_info"), list):
+            raise Stage4Blocked("Malformed guest interface record")
+        for info in interface["addr_info"]:
+            if not isinstance(info, dict):
+                raise Stage4Blocked("Malformed guest IP address record")
+            if info.get("family") == "inet":
+                addresses.add(ipaddress.IPv4Address(info["local"]))
+    return addresses
+
+
+def check_kubernetes_discovery_report(data: dict, *, target_ip: str,
+                                     protected_networks: list[str]) -> dict:
+    """Fail closed on accidental cluster reuse, broken containerd or CIDR collisions."""
+    required = {
+        "distribution", "distributionVersion", "architecture", "k8sMarkers",
+        "kubeadmPolicyRaw", "kubeletPolicyRaw", "kubectlPolicyRaw",
+        "kubeadmInstalled", "kubeletInstalled", "kubectlInstalled",
+        "containerdInstalled", "containerdService", "criPluginsRaw",
+        "criSocketExists", "ipv4Forwarding", "swapEntries",
+        "addressesRaw", "routesRaw", "tcpListenersRaw", "kubeletService",
+    }
+    if not isinstance(data, dict) or not required.issubset(data):
+        raise Stage4Blocked("Incomplete Stage 4.3 discovery report")
+    if (
+        data["distribution"] != "Ubuntu"
+        or data["distributionVersion"] != "26.04"
+        or data["architecture"] != "x86_64"
+    ):
+        raise Stage4Blocked("Kubernetes guest platform differs from approved Ubuntu")
+    markers = data["k8sMarkers"]
+    if not isinstance(markers, list) or len(markers) != 5 or not all(isinstance(x, bool) for x in markers):
+        raise Stage4Blocked("Untrusted Kubernetes marker report")
+    if any(markers):
+        raise Stage4Blocked("Existing Kubernetes cluster markers detected; do not reinitialize")
+    if any(data[name] != "not-installed" for name in ("kubeadmInstalled", "kubeletInstalled", "kubectlInstalled")):
+        raise Stage4Blocked("Kubernetes packages already installed; manual review required")
+    if data["containerdInstalled"] != BASELINE_CONTAINERD_VERSION:
+        raise Stage4Blocked("Containerd package no longer matches pinned Stage 4.2 baseline")
+    if (
+        data["containerdService"] != "active"
+        or data["criSocketExists"] is not True
+        or "io.containerd.cri.v1" not in data["criPluginsRaw"]
+    ):
+        raise Stage4Blocked("Container runtime or CRI is not ready")
+    if data["swapEntries"] != 0 or str(data["ipv4Forwarding"]) != "1":
+        raise Stage4Blocked("Swap or IP forwarding differs from approved baseline")
+    if data["kubeletService"] == "active":
+        raise Stage4Blocked("Unexpected active kubelet service")
+    if ipaddress.IPv4Address(target_ip) not in parse_host_addresses(data["addressesRaw"]):
+        raise Stage4Blocked("Expected private VM IPv4 address is not configured")
+    routes = parse_ip_routes(data["routesRaw"])
+    cidrs = [ipaddress.ip_network(n) for n in protected_networks]
+    if STAGE43_POD_CIDR.overlaps(STAGE43_SERVICE_CIDR):
+        raise Stage4Blocked("Pod and Service CIDRs overlap")
+    for network in routes + cidrs:
+        if network.overlaps(STAGE43_POD_CIDR) or network.overlaps(STAGE43_SERVICE_CIDR):
+            raise Stage4Blocked("Proposed Kubernetes Pod/Service CIDR overlaps an existing network")
+    occupied = parse_listen_ports(data["tcpListenersRaw"]) & STAGE43_CONTROL_PORTS
+    if occupied:
+        raise Stage4Blocked("Kubernetes reserved TCP port is already listening: " + str(sorted(occupied)))
+    package_candidates = {
+        name: parse_apt_candidate(data[name + "PolicyRaw"])
+        for name in ("kubeadm", "kubelet", "kubectl")
+    }
+    return package_candidates
+
+
 def checked_command(args: list[str], *, stage: str) -> None:
     outcome = subprocess.run(args, check=False)
     if outcome.returncode:
@@ -140,11 +259,19 @@ def main(argv=None) -> int:
         "--reboot-approval-token", default=None,
         help="Separate approval phrase required for disruptive sandbox reboots"
     )
+    parser.add_argument(
+        "--discover-kubernetes",
+        action="store_true",
+        help="Stage 4.3.1 Kubernetes readiness, networking and package metadata inspection; guest read-only"
+    )
     args = parser.parse_args(argv)
 
     try:
-        if sum((bool(args.plan_baseline), bool(args.apply_baseline), bool(args.reboot_validate))) > 1:
-            raise Stage4Blocked("Choose plan, apply or reboot verification, not multiple modes")
+        if sum((
+            bool(args.plan_baseline), bool(args.apply_baseline),
+            bool(args.reboot_validate), bool(args.discover_kubernetes),
+        )) > 1:
+            raise Stage4Blocked("Choose plan, apply, reboot or Kubernetes discovery, not multiple modes")
         if args.reboot_validate:
             if args.reboot_approval_token != REBOOT_APPROVAL:
                 raise Stage4Blocked("Explicit sandbox reboot approval is missing")
@@ -339,6 +466,71 @@ def main(argv=None) -> int:
                     "networking survived reboot on all sandbox guests",
                     flush=True,
                 )
+        if args.discover_kubernetes:
+            if len(machines) != 2 or {m["role"] for m in machines} != {"control-plane", "worker"}:
+                raise Stage4Blocked("Stage 4.3 accepts exactly one control plane and one worker")
+            discovery43 = (
+                Path(__file__).resolve().parent
+                / "playbooks" / "40-kubernetes-discovery.yml"
+            )
+            checked_command(
+                ["ansible-playbook", "-i", str(inventory_path),
+                 "--syntax-check", str(discovery43)],
+                stage="Kubernetes discovery syntax check"
+            )
+            report_dir = Path(tempfile.mkdtemp(
+                prefix=f"kubernetes-{args.environment}-{args.revision[:12]}-",
+                dir=state,
+            ))
+            checked_command(
+                ["ansible-playbook", "-i", str(inventory_path),
+                 "-e", json.dumps({"sentinel_report_root": str(report_dir)}),
+                 str(discovery43)],
+                stage="Stage 4.3.1 Kubernetes discovery"
+            )
+            package_status = {}
+            print("\\nSENTINEL KUBERNETES DISCOVERY — READ ONLY", flush=True)
+            for index, machine in enumerate(machines, start=1):
+                report_path = report_dir / f"{machine['name']}.json"
+                if not report_path.is_file() or report_path.is_symlink():
+                    raise Stage4Blocked("Missing private Kubernetes discovery report")
+                if report_path.stat().st_size > 350_000 or (report_path.stat().st_mode & 0o077):
+                    raise Stage4Blocked("Private Kubernetes report permissions or size invalid")
+                data = json.loads(report_path.read_text(encoding="utf-8"))
+                candidates = check_kubernetes_discovery_report(
+                    data, target_ip=machine["staticIP"],
+                    protected_networks=[
+                        spec["network"]["subnet"], *spec["protection"]["subnets"],
+                    ],
+                )
+                package_status[machine["name"]] = candidates
+                def shown(candidate: str | None) -> str:
+                    return candidate or "NOT_IN_APT_CACHE"
+                print(
+                    f"Node {index}/{len(machines)} role={machine['role']} | "
+                    f"containerd={data['containerdInstalled']} active | "
+                    f"swap=0 forwarding=1 | Kubernetes existing=no | "
+                    f"kubeadm={shown(candidates['kubeadm'])} "
+                    f"kubelet={shown(candidates['kubelet'])} "
+                    f"kubectl={shown(candidates['kubectl'])}",
+                    flush=True,
+                )
+            all_candidates = list(package_status.values())
+            matching = all_candidates[0] == all_candidates[1]
+            installed = all(all(v is not None for v in p.values()) for p in all_candidates)
+            if installed and not matching:
+                print("PACKAGE_SOURCE_REVIEW: guest Kubernetes APT candidates differ", flush=True)
+            elif not installed:
+                print("PACKAGE_SOURCE_REVIEW: kubeadm/kubelet/kubectl missing from at least one local APT cache", flush=True)
+            else:
+                print("PACKAGE_SOURCE_REVIEW: candidates discovered; version/repository review still required", flush=True)
+            print(
+                f"NETWORK_CANDIDATES: pod={STAGE43_POD_CIDR} "
+                f"service={STAGE43_SERVICE_CIDR}; no observed overlap on validated guests",
+                flush=True,
+            )
+            print(f"PRIVATE_REPORT: {report_dir}", flush=True)
+            print("STAGE43_DISCOVERED: guests inspected; remote changes=0; no packages installed", flush=True)
         print("STAGE4_READY: guest readiness checks passed; configuration changes depend on selected mode")
         return 0
     except (Stage4Blocked, OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
