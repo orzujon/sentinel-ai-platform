@@ -1,0 +1,82 @@
+---
+# Stage 4.3.4 — approved Flannel deployment with release integrity gate.
+- name: Apply exactly reviewed Flannel release to initialized control plane
+  hosts: sentinel_control_plane
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    sentinel_flannel_url: https://github.com/flannel-io/flannel/releases/download/v0.28.10/kube-flannel.yml
+  tasks:
+    - name: Require explicit approval and exact reviewed SHA256
+      ansible.builtin.assert:
+        that:
+          - sentinel_flannel_approved is defined
+          - sentinel_flannel_approved is sameas true
+          - sentinel_flannel_sha256 is defined
+          - sentinel_flannel_sha256 is match('^[a-f0-9]{64}$')
+    - name: Require initialized API to be reachable
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, --raw=/readyz]
+      register: api
+      changed_when: false
+    - name: Require healthy API server
+      ansible.builtin.assert:
+        that:
+          - api.stdout | trim == 'ok'
+    - name: Refuse to overwrite existing Flannel workload
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, -n, kube-flannel, get, daemonset, kube-flannel-ds, --ignore-not-found, -o, name]
+      register: existing
+      changed_when: false
+    - name: Require fresh first deployment
+      ansible.builtin.assert:
+        that:
+          - existing.stdout | trim == ''
+    - name: Retrieve immutable release URL with TLS validation
+      ansible.builtin.uri:
+        url: "{{ sentinel_flannel_url }}"
+        method: GET
+        follow_redirects: all
+        validate_certs: true
+        return_content: true
+        status_code: 200
+        timeout: 45
+      register: manifest
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      no_log: true
+    - name: Block release drift and unexpected manifest
+      ansible.builtin.assert:
+        that:
+          - manifest.content | hash('sha256') == sentinel_flannel_sha256
+          - manifest.content | length > 1000
+          - manifest.content | length < 250000
+          - "'10.244.0.0/16' in manifest.content"
+          - "'ghcr.io/flannel-io/flannel:v0.28.10' in manifest.content"
+          - "'kind: DaemonSet' in manifest.content"
+        fail_msg: Manifest differs from reviewed content; no deployment permitted
+    - name: Apply reviewed release without writing manifest to public Git
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, apply, -f, /dev/stdin]
+        stdin: "{{ manifest.content }}"
+        stdin_add_newline: false
+      no_log: true
+    - name: Wait for Flannel DaemonSet rollout
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, -n, kube-flannel, rollout, status, daemonset/kube-flannel-ds, --timeout=180s]
+      register: rollout
+      changed_when: false
+    - name: Check control-plane node readiness
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, node, "{{ inventory_hostname }}", -o, "jsonpath={.status.conditions[?(@.type=='Ready')].status}"]
+      register: ready
+      changed_when: false
+    - name: Confirm Ready condition
+      ansible.builtin.assert:
+        that:
+          - ready.stdout == 'True'
+    - name: Report deployment success
+      ansible.builtin.debug:
+        msg: "STAGE434_FLANNEL_READY: pinned release deployed; control plane Ready; worker join not performed"
