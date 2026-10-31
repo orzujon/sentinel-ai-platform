@@ -30,8 +30,11 @@ The wrapper resolves the existing authenticated private configuration
 previously trusted host keys, and executes the Stage 4.1 readiness checks.
 The Kubernetes discovery then inspects the two approved nodes over SSH.
 
-The command does **not** use Ansible privilege escalation, refresh APT
-metadata, install Kubernetes packages, modify the guests or reboot VMs.
+The command uses narrowly scoped, read-only sudo for two inspections:
+checking Kubernetes markers under the root-protected CNI directory and querying
+the root-owned containerd socket. Other guest tasks remain unprivileged.
+It does **not** refresh APT metadata, install Kubernetes packages, change
+guest configuration or reboot VMs.
 Ansible's `changed=1` for the report `copy` task means a **controller-local**
 file was written in the private WSL state directory. The guests are not
 changed.
