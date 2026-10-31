@@ -326,6 +326,10 @@ def main(argv=None) -> int:
     parser.add_argument("--control-plane-approval-token", default=None)
     parser.add_argument("--plan-flannel", action="store_true",
                         help="Read-only Stage 4.3.4 control-plane API and pinned Flannel release plan")
+    parser.add_argument("--apply-flannel", action="store_true",
+                        help="Explicitly approved SHA256-gated Flannel deployment")
+    parser.add_argument("--flannel-approval-token", default=None)
+    parser.add_argument("--flannel-sha256", default=None)
     args = parser.parse_args(argv)
 
     try:
@@ -335,9 +339,16 @@ def main(argv=None) -> int:
             bool(args.plan_kubernetes_packages), bool(args.configure_kubernetes_repo),
             bool(args.plan_kubernetes_install), bool(args.install_kubernetes_packages),
             bool(args.plan_control_plane), bool(args.init_control_plane),
-            bool(args.plan_flannel),
+            bool(args.plan_flannel), bool(args.apply_flannel),
         )) > 1:
             raise Stage4Blocked("Choose exactly one Stage 4.2 or 4.3 mode")
+        if args.apply_flannel:
+            if args.flannel_approval_token != "APPLY_SENTINEL_STAGE434_FLANNEL_02810":
+                raise Stage4Blocked("Missing separate Flannel deployment approval")
+            if not args.flannel_sha256 or not re.fullmatch(r"[a-f0-9]{64}", args.flannel_sha256):
+                raise Stage4Blocked("Reviewed Flannel SHA256 is required for deployment")
+        elif args.flannel_approval_token is not None or args.flannel_sha256 is not None:
+            raise Stage4Blocked("Flannel deployment approval and SHA256 only belong in apply mode")
         if args.init_control_plane:
             if args.control_plane_approval_token != "INITIALIZE_SENTINEL_STAGE433_CONTROL_PLANE":
                 raise Stage4Blocked("Missing explicit Stage 4.3.3 control-plane approval")
@@ -547,6 +558,17 @@ def main(argv=None) -> int:
                     "networking survived reboot on all sandbox guests",
                     flush=True,
                 )
+        if args.apply_flannel:
+            if len(machines) != 2 or {m["role"] for m in machines} != {"control-plane", "worker"}:
+                raise Stage4Blocked("Flannel deployment requires pinned two-node sandbox")
+            flannel_apply = Path(__file__).resolve().parent / "playbooks" / "110-flannel-release-apply.yml"
+            checked_command(["ansible-playbook", "-i", str(inventory_path),
+                             "--syntax-check", str(flannel_apply)], stage="Flannel apply syntax")
+            checked_command(["ansible-playbook", "-i", str(inventory_path),
+                             "-e", json.dumps({"sentinel_flannel_approved": True,
+                                               "sentinel_flannel_sha256": args.flannel_sha256}),
+                             str(flannel_apply)], stage="Approved pinned Flannel deployment")
+            print("STAGE434_FLANNEL_READY", flush=True)
         if args.plan_flannel:
             if len(machines) != 2 or {m["role"] for m in machines} != {"control-plane", "worker"}:
                 raise Stage4Blocked("Flannel planning requires pinned control plane and worker")
