@@ -148,3 +148,29 @@ bootstrap succeeds automatically. `freshBootstrapReady: false` prevents that
 misrepresentation. Stage 5.3 will add a separate, properly approved fresh
 path with bounded waits, recovery checkpoints, artifact verification and
 single-run evidence. Do not remove or reset the functioning sandbox to test it.
+
+
+### First-boot SSH host-key attestation — offline comparison gate
+
+`infrastructure/ansible/verify_first_boot_hostkey.py` now validates an
+independently attested ED25519 guest host public key against an observed
+candidate, strictly tied to an expected node/IP pair. **This is comparison
+only.** It does not fetch the candidate, create known_hosts entries, or
+bootstrap SSH trust; it must not be treated as an automatic first-use trust
+implementation.
+
+Inputs (private, operator-controlled paths):
+
+```powershell
+python .\infrastructure\ansible\verify_first_boot_hostkey.py `
+  --node sentinel-l1-cp01 --address 10.78.0.10 `
+  --attested-file C:\PrivateLab\hostkeys\cp-console.pub `
+  --observed-file C:\PrivateLab\hostkeys\cp-network.pub
+```
+
+Acquire the `attested-file` from the Hyper-V guest console or another
+independently verified mechanism—not from the same network endpoint being
+verified. Comparing two network-fetched keys proves nothing about server
+identity. Only after a valid match and separate reviewed approval should an
+integrator write trusted known_hosts records. The **currently running lab
+must not have its existing trusted records changed** during this development.
