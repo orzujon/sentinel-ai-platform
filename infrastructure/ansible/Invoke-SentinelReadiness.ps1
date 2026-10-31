@@ -16,6 +16,7 @@ param(
     [switch]$ConfigureKubernetesRepo,
     [switch]$PlanKubernetesInstall,
     [switch]$InstallKubernetesPackages,
+    [switch]$PlanFlannel,
     [switch]$PlanControlPlane,
     [switch]$InitControlPlane,
     [string]$ControlPlaneApprovalToken,
@@ -38,7 +39,8 @@ $selectedModeCount = [int]$PlanBaseline.IsPresent +
     [int]$PlanKubernetesInstall.IsPresent +
     [int]$InstallKubernetesPackages.IsPresent +
     [int]$PlanControlPlane.IsPresent +
-    [int]$InitControlPlane.IsPresent
+    [int]$InitControlPlane.IsPresent +
+    [int]$PlanFlannel.IsPresent
 if ($selectedModeCount -gt 1) {
     throw 'BLOCKED: choose exactly one Stage 4.2 or 4.3 mode'
 }
@@ -164,6 +166,9 @@ if ($DiscoverKubernetes.IsPresent) {
 if ($PlanKubernetesPackages.IsPresent) {
     $wslArgs += '--plan-kubernetes-packages'
 }
+if ($PlanFlannel.IsPresent) {
+    $wslArgs += '--plan-flannel'
+}
 if ($PlanControlPlane.IsPresent) {
     $wslArgs += '--plan-control-plane'
 }
@@ -190,6 +195,8 @@ if ($ApplyBaseline.IsPresent) {
     Write-Host 'PASS: Stage 4.2 reboot persistence verification completed on both sandbox guests.'
 } elseif ($DiscoverKubernetes.IsPresent) {
     Write-Host 'PASS: Stage 4.3.1 Kubernetes discovery completed without modifying guests.'
+} elseif ($PlanFlannel.IsPresent) {
+    Write-Host 'PASS: Stage 4.3.4 release plan checked without Kubernetes changes.'
 } elseif ($PlanControlPlane.IsPresent) {
     Write-Host 'PASS: Stage 4.3.3 kubeadm configuration validated; no cluster initialized.'
 } elseif ($InitControlPlane.IsPresent) {
