@@ -20,7 +20,7 @@ class Stage44Contract(unittest.TestCase):
         allowed = {"ansible.builtin.command", "ansible.builtin.assert",
                    "ansible.builtin.set_fact", "ansible.builtin.debug"}
         for task in self.tasks:
-            self.assertTrue(set(task) - {"name"} <= allowed, task["name"])
+            self.assertTrue(set(task) - {"name", "register", "changed_when"} <= allowed, task["name"])
             if "ansible.builtin.command" in task:
                 self.assertIs(task["changed_when"], False)
                 argv = task["ansible.builtin.command"]["argv"]
