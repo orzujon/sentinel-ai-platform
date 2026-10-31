@@ -90,6 +90,9 @@ jobs:
       - name: Verify Stage 5.2 read-only existing-environment orchestration contract
         shell: powershell
         run: .\infrastructure\level1\tests\Test-BootstrapVerify.ps1
+      - name: Validate Stage 5.3 fresh bootstrap dependency and safety contract
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-FreshBootstrapContract.ps1
       - name: Parse all Level 1 PowerShell modules and verify isolation checks
         shell: powershell
         run: .\infrastructure\level1\tests\Test-StaticSafety.ps1
