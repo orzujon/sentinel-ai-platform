@@ -7,7 +7,7 @@ function Get-SentinelBootstrapRoute {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string[]]$ExpectedVMNames,
-        [Parameter(Mandatory)][string[]]$ExistingVMNames,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ExistingVMNames,
         [Parameter(Mandatory)][bool]$ExpectedSwitchExists,
         [Parameter(Mandatory)][bool]$ExpectedVMRootExists
     )
