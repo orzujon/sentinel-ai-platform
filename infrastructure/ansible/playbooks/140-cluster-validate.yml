@@ -67,13 +67,13 @@
 
     - name: Parse Kubernetes evidence in memory
       ansible.builtin.set_fact:
-        sentinel_node_list: "{{ (sentinel_nodes_raw.stdout | from_json).items }}"
+        sentinel_node_list: "{{ (sentinel_nodes_raw.stdout | from_json)['items'] }}"
         sentinel_coredns: "{{ sentinel_coredns_raw.stdout | from_json }}"
         sentinel_dns_service: "{{ sentinel_dns_service_raw.stdout | from_json }}"
-        sentinel_dns_endpoints: "{{ (sentinel_dns_endpoints_raw.stdout | from_json).items }}"
+        sentinel_dns_endpoints: "{{ (sentinel_dns_endpoints_raw.stdout | from_json)['items'] }}"
         sentinel_flannel_ds: "{{ sentinel_flannel_ds_raw.stdout | from_json }}"
-        sentinel_flannel_pods: "{{ (sentinel_flannel_pods_raw.stdout | from_json).items }}"
-        sentinel_system_pods: "{{ (sentinel_system_pods_raw.stdout | from_json).items }}"
+        sentinel_flannel_pods: "{{ (sentinel_flannel_pods_raw.stdout | from_json)['items'] }}"
+        sentinel_system_pods: "{{ (sentinel_system_pods_raw.stdout | from_json)['items'] }}"
 
     - name: Build name-indexed node state
       ansible.builtin.set_fact:
@@ -84,7 +84,7 @@
         that:
           - sentinel_api.stdout | trim == 'ok'
           - sentinel_nodes_by_name | length == 2
-          - sentinel_nodes_by_name.keys() | list | sort == [sentinel_expected_cp, sentinel_expected_worker] | sort
+          - (sentinel_nodes_by_name.keys() | list | sort) == ([sentinel_expected_cp, sentinel_expected_worker] | sort)
           - sentinel_nodes_by_name[sentinel_expected_cp].status.nodeInfo.kubeletVersion == 'v1.37.2'
           - sentinel_nodes_by_name[sentinel_expected_worker].status.nodeInfo.kubeletVersion == 'v1.37.2'
           - "'True' in (sentinel_nodes_by_name[sentinel_expected_cp].status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | list)"
@@ -110,7 +110,7 @@
           - sentinel_flannel_ds.status.numberReady | int == 2
           - sentinel_flannel_ds.status.updatedNumberScheduled | int == 2
           - "sentinel_flannel_pods | selectattr('status.phase', 'equalto', 'Running') | list | length == 2"
-          - "sentinel_flannel_pods | map(attribute='spec.nodeName') | list | sort == [sentinel_expected_cp, sentinel_expected_worker] | sort"
+          - "(sentinel_flannel_pods | map(attribute='spec.nodeName') | list | sort) == ([sentinel_expected_cp, sentinel_expected_worker] | sort)"
         fail_msg: Flannel coverage or Pod health differs from expected two-node topology
 
     - name: Require all kube-system Pods Running or Succeeded
