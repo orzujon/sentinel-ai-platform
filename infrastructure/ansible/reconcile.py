@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import subprocess
 import tempfile
 import urllib.request
@@ -88,6 +89,7 @@ def reconcile(*, inventory: Path, environment: str, mode: str, approval: bool,
             ("flannel", Path(__file__).resolve().parent / "playbooks" / "120-reconcile-flannel.yml"),
             ("worker", Path(__file__).resolve().parent / "playbooks" / "130-reconcile-worker.yml"),
             ("cluster-validation", Path(__file__).resolve().parent / "playbooks" / "140-cluster-validate.yml"),
+            ("active-network", Path(__file__).resolve().parent / "playbooks" / "150-active-network.yml"),
         ]
         variables = {
             "sentinel_reconcile_mode": mode,
@@ -95,6 +97,8 @@ def reconcile(*, inventory: Path, environment: str, mode: str, approval: bool,
             "sentinel_flannel_version": release["version"],
             "sentinel_flannel_sha256": release["digest"],
             "sentinel_flannel_artifact": str(asset),
+            "sentinel_netcheck_namespace": "sentinel-netcheck-" + secrets.token_hex(6),
+            "sentinel_netcheck_image": "busybox:1.37.0",
         }
         print(f"RECONCILE_TARGET: env={environment} flannel={release['version']} artifact_sha256={release['digest']} mode={mode}", flush=True)
         results = []
