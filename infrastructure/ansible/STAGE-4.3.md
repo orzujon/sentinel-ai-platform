@@ -1,6 +1,6 @@
 # Stage 4.3.1 — Kubernetes discovery (read-only)
 
-**Status: implementation proposed, pending validation against the two sandbox VMs.**
+**Status: Stage 4.3.1 verified on both sandbox guests (2026-10-31); Stage 4.3.2 read-only package-source plan pending local validation.**
 Do not install Kubernetes packages, call `kubeadm init`/`join`, apply
 Flannel, modify network settings or touch existing protected VMs in this step.
 
@@ -60,6 +60,66 @@ contains only discovery automation and non-secret proposals.
 `PACKAGE_SOURCE_REVIEW` is expected if kubeadm is not in the guest's
 current package cache. Missing package candidates are *not* permission
 to silently add a repository or run `apt update`.
+
+## Stage 4.3.1 result (2026-10-31)
+
+Both sandbox guests passed strict identity, containerd 2.2.2 baseline, CRI,
+swap=0 and IPv4 forwarding checks. No existing Kubernetes installation
+was detected. `kubeadm`, `kubelet`, and `kubectl` were absent from
+the existing APT cache on both guests. Proposed Pod/Service ranges did not
+overlap with guest or protected lab networks inspected. The review of
+Windows/WSL/external network overlaps remains outstanding.
+
+## Stage 4.3.2 first increment — read-only repository source plan
+
+Official Kubernetes release documentation currently shows v1.37 as a
+supported minor, and v1.37.1 as its documented stable patch. This is a
+**version proposal**, not an approved exact Debian package version. Before
+installing anything we must read *signed APT metadata* from both guests and
+verify the full exact package revision for `kubeadm`, `kubelet`, and
+`kubectl`. Do not guess a `-1.1` suffix.
+
+Use the dedicated minor-scoped repository:
+`https://pkgs.k8s.io/core:/stable:/v1.37/deb/`
+with the vendor's `Release.key` under the `signed-by` keyring pattern.
+Do not use deprecated `apt.kubernetes.io` or `apt-key add`.
+
+**Read-only plan command from Windows PowerShell:**
+
+```powershell
+.\infrastructure\ansible\Invoke-SentinelReadiness.ps1 `
+    -ConfigRepo "C:\Sentinel\config-readonly" `
+    -PlanKubernetesPackages
+```
+
+This command reruns Stage 4.1 and 4.3.1 guest validation, then checks:
+the `/etc/apt/sources.list.d/kubernetes.list` and
+`/etc/apt/keyrings/kubernetes-apt-keyring.gpg` files, package signing
+utilities, existing package holds, and HTTPS certificate-validated
+reachability of the official minor-scoped signing-key endpoint. It does
+**not** write a trusted key, add an APT repo, run `apt update`, or install
+any packages. Only private `0600` WSL-controller reports are created.
+An HTTPS GET validates connectivity and certificates but **does not by
+itself authenticate the signing key's provenance**; explicit review of
+the upstream vendor key and of signed package metadata is still required.
+
+**Next separate, approval-gated apply design:**
+
+1. Confirm no conflicting `kubernetes.list`, keyring, or alternate Kubernetes
+   repositories are already configured, and review authentic key identity.
+2. Install required TLS/GPG tooling only after an approved package plan.
+3. Install the reviewed signing key under `/etc/apt/keyrings/`; configure a
+   `signed-by` source for v1.37 without overwriting unrelated files.
+4. Refresh only after the approved repository change and inspect APT policy,
+   origin/signature, dependency changes, and exact package revision on both VMs.
+5. Propose a *separate* approved install of exact matching package versions,
+   mark them held and verify. A kubelet that starts but has no cluster
+   configuration is expected until Stage 4.3.3.
+6. `kubeadm init`, Flannel and `kubeadm join` are **explicitly out of scope**
+   for Stage 4.3.2.
+
+Source:
+https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/
 
 ## Decisions before Stage 4.3.2
 
