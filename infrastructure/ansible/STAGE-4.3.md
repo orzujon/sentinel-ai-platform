@@ -1,6 +1,6 @@
 # Stage 4.3.1 — Kubernetes discovery (read-only)
 
-**Status (2026-10-31): Stage 4.3.1 verified; Stage 4.3.2 repository bootstrap executed successfully on both sandbox guests. Kubernetes packages remain uninstalled. The next read-only installation simulation is implemented but awaits local execution.**
+**Status (2026-10-31): Stage 4.3.1 discovery complete. Stage 4.3.2 signed repository and pinned kubeadm/kubelet/kubectl installation/holds completed and confirmed on both isolated nodes. Stage 4.3.3 control-plane configuration and guarded init code is implemented; local plan validation is pending.**
 Do not install Kubernetes packages, call `kubeadm init`/`join`, apply
 Flannel, modify network settings or touch existing protected VMs in this step.
 
@@ -243,3 +243,41 @@ post-install observation must be reviewed before further work.
 Stage 4.3.3 (control-plane initialization) remains blocked on CIDR review
 outside the guests, selected private NIC IPs, firewall verification, and
 separate bootstrap design and approval.
+
+## Stage 4.3.3 — initialize the control plane (new implementation)
+
+Reuse **the private pinned inventory** and previously validated network design.
+The control-plane IP comes from the configured `ansible_host` of the existing
+`sentinel_control_plane` group. No new static IP, virtual switch, VM,
+containerd reinstall or network provisioning is performed. Kubernetes v1.37.2
+is configured using the kubeadm `v1beta4` schema, containerd CRI socket,
+node-ip, advertised API IP, Pod CIDR `10.244.0.0/16`, and Service CIDR
+`10.96.0.0/12`.
+
+Run **plan mode first**, from Windows PowerShell:
+
+```powershell
+git pull --ff-only origin feature/stage43-kubernetes-discovery
+.\infrastructure\ansible\Invoke-SentinelReadiness.ps1 `
+  -ConfigRepo "C:\Sentinel\config-readonly" `
+  -PlanControlPlane
+```
+
+The command reuses the controller's previously trusted SSH inventory and
+verifies package versions on both nodes. On the control plane only, it checks
+initialization markers, confirms the expected private IP is present and calls
+`kubeadm config validate` using stdin. Plan mode does not write a kubeadm
+config, create join secrets, install packages or initialize the cluster.
+
+**Application is a separate operator decision.** After plan output and
+GitHub Actions are reviewed, `-InitControlPlane` with
+`-ControlPlaneApprovalToken "INITIALIZE_SENTINEL_STAGE433_CONTROL_PLANE"`
+runs the same preflight and then writes a root-only kubeadm configuration,
+initializes the control plane with `--skip-token-print`, and checks
+the API manifest. Neither Flannel nor worker joining is included. An initial
+API server may be running but nodes remain NotReady until a CNI is installed.
+If a partial init fails, stop for inspection instead of resetting and retrying.
+
+Important: the old Kubernetes discovery path intentionally requires packages
+to be absent. **Do not rerun Stage 4.3.1 or 4.3.2 bootstrap** on these
+already-installed nodes. Use the new `-PlanControlPlane` mode.
