@@ -16,6 +16,9 @@ param(
     [switch]$ConfigureKubernetesRepo,
     [switch]$PlanKubernetesInstall,
     [switch]$InstallKubernetesPackages,
+    [switch]$PlanControlPlane,
+    [switch]$InitControlPlane,
+    [string]$ControlPlaneApprovalToken,
     [string]$InstallApprovalToken,
     [string]$RepositoryApprovalToken
 )
@@ -33,9 +36,18 @@ $selectedModeCount = [int]$PlanBaseline.IsPresent +
     [int]$PlanKubernetesPackages.IsPresent +
     [int]$ConfigureKubernetesRepo.IsPresent +
     [int]$PlanKubernetesInstall.IsPresent +
-    [int]$InstallKubernetesPackages.IsPresent
+    [int]$InstallKubernetesPackages.IsPresent +
+    [int]$PlanControlPlane.IsPresent +
+    [int]$InitControlPlane.IsPresent
 if ($selectedModeCount -gt 1) {
     throw 'BLOCKED: choose exactly one Stage 4.2 or 4.3 mode'
+}
+if ($InitControlPlane.IsPresent) {
+    if ($ControlPlaneApprovalToken -cne 'INITIALIZE_SENTINEL_STAGE433_CONTROL_PLANE') {
+        throw 'BLOCKED: separate Stage 4.3.3 initialization approval missing'
+    }
+} elseif ($ControlPlaneApprovalToken) {
+    throw 'BLOCKED: initialization token only valid with -InitControlPlane'
 }
 if ($InstallKubernetesPackages.IsPresent) {
     if ($InstallApprovalToken -cne 'INSTALL_SENTINEL_STAGE432_K8S_1372') {
@@ -117,6 +129,8 @@ if ($ApplyBaseline.IsPresent) {
     Write-Host 'APPROVED APPLY MODE: Stage 4.2 will change the sandbox guests.'
 } elseif ($RebootValidate.IsPresent) {
     Write-Host 'APPROVED REBOOT MODE: Stage 4.2 will reboot both sandbox VMs sequentially.'
+} elseif ($InitControlPlane.IsPresent) {
+    Write-Host 'APPROVED CONTROL-PLANE INIT: only the sandbox control-plane guest will be initialized.'
 } elseif ($InstallKubernetesPackages.IsPresent) {
     Write-Host 'APPROVED PACKAGE INSTALL: pinned kubeadm, kubelet and kubectl will be installed and held on both sandbox guests.'
 } elseif ($ConfigureKubernetesRepo.IsPresent) {
@@ -150,6 +164,12 @@ if ($DiscoverKubernetes.IsPresent) {
 if ($PlanKubernetesPackages.IsPresent) {
     $wslArgs += '--plan-kubernetes-packages'
 }
+if ($PlanControlPlane.IsPresent) {
+    $wslArgs += '--plan-control-plane'
+}
+if ($InitControlPlane.IsPresent) {
+    $wslArgs += @('--init-control-plane', '--control-plane-approval-token', $ControlPlaneApprovalToken)
+}
 if ($PlanKubernetesInstall.IsPresent) {
     $wslArgs += '--plan-kubernetes-install'
 }
@@ -170,6 +190,10 @@ if ($ApplyBaseline.IsPresent) {
     Write-Host 'PASS: Stage 4.2 reboot persistence verification completed on both sandbox guests.'
 } elseif ($DiscoverKubernetes.IsPresent) {
     Write-Host 'PASS: Stage 4.3.1 Kubernetes discovery completed without modifying guests.'
+} elseif ($PlanControlPlane.IsPresent) {
+    Write-Host 'PASS: Stage 4.3.3 kubeadm configuration validated; no cluster initialized.'
+} elseif ($InitControlPlane.IsPresent) {
+    Write-Host 'PASS: Stage 4.3.3 approved control plane initialization completed.'
 } elseif ($PlanKubernetesInstall.IsPresent) {
     Write-Host 'PASS: Stage 4.3.2 read-only pinned package installation simulation passed.'
 } elseif ($InstallKubernetesPackages.IsPresent) {
