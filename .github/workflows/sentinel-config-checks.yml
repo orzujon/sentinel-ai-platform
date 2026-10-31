@@ -53,6 +53,8 @@ jobs:
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/120-reconcile-flannel.yml
       - name: Validate Stage 4.3.5 worker reconciliation playbook syntax
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/130-reconcile-worker.yml
+      - name: Validate Stage 4.4 read-only cluster acceptance playbook
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/140-cluster-validate.yml
       - name: Compile Python management runner
         run: python -m py_compile infrastructure/ansible/run_readiness.py infrastructure/ansible/reconcile.py
       - name: Execute Level 1 static package tests
