@@ -324,6 +324,8 @@ def main(argv=None) -> int:
     parser.add_argument("--init-control-plane", action="store_true",
                         help="Explicitly approved first-time control-plane init")
     parser.add_argument("--control-plane-approval-token", default=None)
+    parser.add_argument("--plan-flannel", action="store_true",
+                        help="Read-only Stage 4.3.4 control-plane API and pinned Flannel release plan")
     args = parser.parse_args(argv)
 
     try:
@@ -333,6 +335,7 @@ def main(argv=None) -> int:
             bool(args.plan_kubernetes_packages), bool(args.configure_kubernetes_repo),
             bool(args.plan_kubernetes_install), bool(args.install_kubernetes_packages),
             bool(args.plan_control_plane), bool(args.init_control_plane),
+            bool(args.plan_flannel),
         )) > 1:
             raise Stage4Blocked("Choose exactly one Stage 4.2 or 4.3 mode")
         if args.init_control_plane:
@@ -544,6 +547,15 @@ def main(argv=None) -> int:
                     "networking survived reboot on all sandbox guests",
                     flush=True,
                 )
+        if args.plan_flannel:
+            if len(machines) != 2 or {m["role"] for m in machines} != {"control-plane", "worker"}:
+                raise Stage4Blocked("Flannel planning requires pinned control plane and worker")
+            flannel = Path(__file__).resolve().parent / "playbooks" / "100-flannel-release-plan.yml"
+            checked_command(["ansible-playbook", "-i", str(inventory_path),
+                             "--syntax-check", str(flannel)], stage="Flannel release plan syntax")
+            checked_command(["ansible-playbook", "-i", str(inventory_path), str(flannel)],
+                            stage="Stage 4.3.4 pinned Flannel release inspection")
+            print("STAGE434_PLAN_READY: review pinned manifest fingerprint", flush=True)
         if args.plan_control_plane or args.init_control_plane:
             if len(machines) != 2 or {m["role"] for m in machines} != {"control-plane", "worker"}:
                 raise Stage4Blocked("Stage 4.3.3 accepts only the two-node pinned sandbox")
