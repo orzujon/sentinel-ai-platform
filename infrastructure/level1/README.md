@@ -1,8 +1,10 @@
+> **Stage 5 update (2026-10-31):** A non-mutating `bootstrap-plan` route classifier has been introduced. Stages 1–4 were separately implemented and successfully exercised in the lab; full clean-room orchestration is **not yet implemented**. Stage 4 Kubernetes playbooks and live acceptance evidence are documented under `infrastructure/ansible/`.
+
 > This public README uses fictional example inventory. Run actual infrastructure operations only with separately approved private configuration and validated resource safeguards. The currently imported legacy PowerShell modules still contain environment-specific constants and are being reviewed for extraction.
 
 # Sentinel — Level 1 Infrastructure Provisioning Pipeline
 
-**Status:** Stages 1–3 (preflight, approved image cache, isolated Hyper-V VM provisioning and authenticated guest health) implemented and previously exercised in the local lab. Stage 4 Ansible and subsequent Kubernetes automation are **not implemented**. The repository import has not yet been end-to-end revalidated from this new path.
+**Status:** Stages 1–3 (preflight, approved image cache, isolated Hyper-V VM provisioning and authenticated guest health) implemented and previously exercised in the local lab. Stage 4 Kubernetes deployment and operational acceptance have been implemented separately and exercised against the dedicated two-node sandbox. Unified clean-room bootstrap is still pending. The repository import has not yet been end-to-end revalidated from this new path.
 
 This includes read-only checks and separately approved provisioning toward an automated Hyper-V → Ubuntu → Ansible → kubeadm → Flannel → Kubernetes provisioning pipeline. It uses a new, isolated sandbox namespace and **never touches your existing** `example-existing-cp`, `example-existing-worker`, `Example-Existing` switch or `198.51.100.0/24` private network.
 
@@ -65,3 +67,31 @@ Real environment configuration must remain outside public Git. Stage 2 requires 
 ## Prerequisites
 
 PowerShell 5.1+ on Windows 11 Professional/Enterprise, elevated for feature/Hyper-V inspection. Image and VM stages require WSL Ubuntu image tooling; Ansible will be introduced later. Requirements are based on Microsoft Hyper-V requirements: https://learn.microsoft.com/virtualization/hyper-v-on-windows/reference/hyper-v-requirements
+
+
+## Stage 5 — Bootstrap orchestration (first increment)
+
+Run from an elevated Windows PowerShell session using the local Git-ignored
+`config/lab.json` already approved for the sandbox:
+
+```powershell
+cd C:\Users\Orzu\projects\sentinel-ai-platform\infrastructure\level1
+.\sentinel.ps1 bootstrap-plan
+.\sentinel.ps1 runs
+```
+
+`bootstrap-plan` checks the pinned environment and classifies the current
+Hyper-V sandbox as `verify-existing`, `new-sandbox`, or
+`blocked-partial`. The route is recorded in `runs/<id>/bootstrap-plan.json`.
+It never creates, stops, resets, adopts, or deletes VMs; it does not run
+Ansible or kubeadm. On the current two-node sandbox, the expected route is
+`verify-existing`, but the planner is not itself a VM integrity or cluster
+health verification. Continue using `infra-verify` and Stage 4 `-Reconcile`
+for these independent checks until Stage 5 orchestrates them automatically.
+
+This initial increment intentionally **does not support one-command clean
+provisioning**. The existing Stage 3 module refuses to adopt existing guests,
+and Stage 4 trust establishment and Kubernetes first bootstrap still require
+separate guarded steps. Stage 5 will integrate these stages without removing
+existing safety gates, and will require a separate accepted clean-environment
+exercise before claiming full bootstrap support.
