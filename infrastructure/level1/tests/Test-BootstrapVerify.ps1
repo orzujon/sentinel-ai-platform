@@ -22,4 +22,11 @@ foreach ($prohibited in @('-ReconcileApprovalToken','-NetworkTest','New-VM','Rem
 if ($module -notmatch "stage='kubernetes-readonly'" -or $module -notmatch 'mutating = \$false') {
     throw 'Stage 5 verification report or read-only contract missing'
 }
+if ($verifySection -notmatch '& \$Stage4Script -ConfigRepo \$ConfigRepo -Reconcile \| Out-Host') {
+    throw 'Stage 4 console output must not contaminate Stage 5 structured result'
+}
+if ($verifySection -notmatch '\$LASTEXITCODE -ne 0' -or
+    $verifySection -notmatch "Stage 4 read-only reconciliation failed") {
+    throw 'Stage 5 must fail closed on a nonzero Stage 4 process exit'
+}
 Write-Host 'PASS: Stage 5.2 existing-lab verification safely chains read-only controls'
