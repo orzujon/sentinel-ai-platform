@@ -121,6 +121,58 @@ the upstream vendor key and of signed package metadata is still required.
 Source:
 https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/
 
+## Approved repository bootstrap (separate from the read-only plan)
+
+After reviewing the successful read-only plan, an operator may **explicitly
+approve** a first-time Kubernetes v1.37 APT repository setup:
+
+```powershell
+.\infrastructure\ansible\Invoke-SentinelReadiness.ps1 `
+    -ConfigRepo "C:\Sentinel\config-readonly" `
+    -ConfigureKubernetesRepo `
+    -RepositoryApprovalToken "CONFIGURE_SENTINEL_STAGE432_K8S_REPO"
+```
+
+**The command changes the two sandbox guests** by creating the Kubernetes
+keyring and APT source files and refreshing APT package indexes. It does not
+install kubeadm, kubelet, kubectl, or initialize Kubernetes.
+
+The controller first runs strict SSH identity and readiness validation, the
+Stage 4.3.1 Kubernetes empty-cluster discovery, and the Stage 4.3.2
+repository-source plan on **both** approved guests before changing either.
+The Ansible playbook then has a second all-host read-only preflight that
+rejects existing or partial Kubernetes repository setup, scans Debian source
+list locations for conflicting Kubernetes sources, fetches the official
+Release.key over verified HTTPS, and checks the key's exact pinned primary
+fingerprint `DE15B14486CD377B9E876E1A234654DA9A296436` before any source
+registration.
+
+The pinned fingerprint is corroborated in Kubernetes community discussions:
+https://github.com/kubernetes/website/issues/42718
+and should be re-reviewed after any documented signing key rotation.
+
+Approved mutation is serialized one guest at a time. The playbook writes a
+root-owned keyring and a `signed-by` source for **v1.37 only** and refreshes
+APT indexes with normal signature verification enabled. Exact available
+`kubeadm`, `kubelet`, `kubectl` candidates are reported to a private
+controller directory for cross-node version comparison. No package
+installation follows from this operation.
+
+**Fail-closed recovery:** Existing/partial source or keyring files cause
+future first-time bootstrap attempts to fail rather than overwriting them.
+This first-time bootstrap is intentionally one-shot; a separate read-only
+verification and managed rerun path will be required before claiming
+post-apply idempotence. If a network, GPG or APT error occurs after the
+first guest is configured, stop and manually reconcile the observed state.
+Do not delete a keyring or rerun with disabled TLS/signatures just to get
+past the gate.
+
+**Next gate:** pin the exact Debian package revision actually reported
+from signed APT metadata on *both* guests, assess dependencies and
+review a separate Kubernetes package installation. That installation
+still requires its own explicit approval and will not be included in
+repository bootstrap.
+
 ## Decisions before Stage 4.3.2
 
 1. Review the supported Kubernetes minor release and pin exact kubeadm,
