@@ -143,7 +143,13 @@ function Invoke-SentinelBootstrapVerify {
         if (-not (Test-Path -LiteralPath $Stage4Script -PathType Leaf)) { throw 'Pinned Stage 4 entry point unavailable' }
         if (-not (Test-Path -LiteralPath $ConfigRepo -PathType Container)) { throw 'Private Stage 4 config clone missing' }
         # No approval: existing Stage 4 entry point runs its read-only plan.
-        & $Stage4Script -ConfigRepo $ConfigRepo -Reconcile
+        # Display child diagnostics without polluting this function's single result object.
+        # PowerShell functions emit all uncaptured pipeline output as return values.
+        $global:LASTEXITCODE = $null
+        & $Stage4Script -ConfigRepo $ConfigRepo -Reconcile | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "Stage 4 read-only reconciliation failed (exit code $LASTEXITCODE)"
+        }
         $steps.Add([pscustomobject]@{ stage='kubernetes-readonly'; result='PASS' })
         $status = 'VERIFIED'
         $reason = 'Existing Hyper-V identities, network and Kubernetes health verified without changes'
