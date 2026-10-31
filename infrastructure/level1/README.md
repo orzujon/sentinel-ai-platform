@@ -121,3 +121,30 @@ cluster, or recover persistent application data. It is verification of an
 existing healthy environment; fresh bootstrap from empty VMs remains a
 separate implementation milestone. A live successful `bootstrap-verify` run
 is required before calling Stage 5.2 operationally complete.
+
+
+## Stage 5.3 — Fresh-bootstrap dependency and approval contract
+
+A new `freshBootstrapSteps` array in `bootstrap-plan.json` records the
+ordered lifecycle, independent approvals, and currently missing integration.
+Run the existing **read-only** planner then inspect the new sequence:
+
+```powershell
+.\sentinel.ps1 bootstrap-plan
+$latest = Get-ChildItem .\runs -Directory | Sort-Object Name -Descending | Select-Object -First 1
+(Get-Content (Join-Path $latest.FullName 'bootstrap-plan.json') -Raw | ConvertFrom-Json).freshBootstrapSteps |
+    Format-Table order,id,operation,approval,ready -AutoSize
+```
+
+This is an architecture and safety contract, not a provisioning executor. It
+records that the existing verified image/Hyper-V/Ansible primitives are
+individually implemented, while **first-time SSH host-key attestation** and
+**worker enrollment from a never-joined cluster** require separate safe
+integration. The current Stage 4 controller protects SSH trust by requiring
+previously pinned keys; it deliberately does not auto-trust a new VM's public
+key. Similarly, the approved reconciliation workflow is for already created
+Kubernetes control planes. It must not be used to claim a fresh-cluster
+bootstrap succeeds automatically. `freshBootstrapReady: false` prevents that
+misrepresentation. Stage 5.3 will add a separate, properly approved fresh
+path with bounded waits, recovery checkpoints, artifact verification and
+single-run evidence. Do not remove or reset the functioning sandbox to test it.
