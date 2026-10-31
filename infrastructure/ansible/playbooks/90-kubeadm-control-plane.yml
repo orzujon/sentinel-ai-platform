@@ -100,6 +100,14 @@
       ansible.builtin.debug:
         msg: "STAGE433_PLAN_READY: kubeadm v1.37.2 control-plane config validated against pinned private inventory"
       when: sentinel_kubeadm_mode == 'plan'
+    - name: Ensure kubeadm configuration directory exists for approved apply
+      ansible.builtin.file:
+        path: /etc/kubernetes
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      when: sentinel_kubeadm_mode == 'apply'
     - name: Write approved root-only kubeadm configuration
       ansible.builtin.copy:
         dest: /etc/kubernetes/sentinel-init.yaml
