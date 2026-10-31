@@ -281,3 +281,7 @@ If a partial init fails, stop for inspection instead of resetting and retrying.
 Important: the old Kubernetes discovery path intentionally requires packages
 to be absent. **Do not rerun Stage 4.3.1 or 4.3.2 bootstrap** on these
 already-installed nodes. Use the new `-PlanControlPlane` mode.
+
+## Stage 4.3.4 — pinned Flannel release plan
+
+Control plane initialization was approved and passed locally on 2026-10-31. Run the -PlanFlannel switch through Invoke-SentinelReadiness.ps1 with the existing -ConfigRepo option. It verifies Kubernetes /readyz from the control-plane kubeconfig, checks that the Flannel DaemonSet does not yet exist, fetches the exact v0.28.10 release asset over TLS and prints SHA256 for operator review. This mode DOES NOT deploy anything. Review asset image references and interface selection before authorizing a separately gated deployment.
