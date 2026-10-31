@@ -327,3 +327,27 @@ control plane and Flannel first install/reverification. It does not yet provisio
 fresh VMs through an end-to-end orchestrator, join the worker, or perform CNI
 upgrades/rollbacks. Desired-state changes to an existing Flannel release are
 blocked until a reviewed upgrade and recovery flow is implemented.
+
+
+## Level 1 — Stage 4.4 cluster health and repeatability (in progress)
+
+The existing `-Reconcile` pipeline now runs a read-only Stage 4.4 playbook
+*after* Flannel reconciliation and worker join/verification. This checks
+Kubernetes API /readyz, exactly the two pinned nodes (kubelet v1.37.2,
+Ready conditions, expected private InternalIP), ready CoreDNS replicas,
+its Service and ready EndpointSlices, Flannel DaemonSet scheduled and ready
+on both nodes, and the phases of kube-system Pods.
+
+These checks run automatically on every invocation, including read-only
+`-Reconcile` with no approval. The stage never creates Kubernetes resources
+and is not a substitute for active DNS queries, cross-node Pod traffic,
+controlled failure injection or disaster recovery testing. These are
+remaining Stage 4.4 acceptance gates, and are marked NOT_RUN in output rather
+than falsely represented as passed.
+
+**Idempotence observation:** A repeat approved `-Reconcile` should skip
+Flannel apply/annotation and skip worker join/token generation; compare
+Ansible changed counts (expected zero) and audit results. This must be
+verified against the actual sandbox before declaring Stage 4.4 complete.
+
+**Status:** Stage 4.4 read-only code implemented; live validation pending.
