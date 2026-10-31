@@ -35,6 +35,8 @@ jobs:
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/30-reboot-persistence.yml
       - name: Validate Stage 4.3.1 read-only Kubernetes discovery playbook syntax
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/40-kubernetes-discovery.yml
+      - name: Validate read-only Stage 4.3.2 source plan playbook syntax
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/50-kubernetes-package-source-plan.yml
       - name: Execute Level 1 static package tests
         run: python -m unittest discover -s infrastructure/level1/tests -p 'test_*.py' -v
       - name: Demonstrate read-only sample plan
