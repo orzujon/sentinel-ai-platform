@@ -351,3 +351,37 @@ Ansible changed counts (expected zero) and audit results. This must be
 verified against the actual sandbox before declaring Stage 4.4 complete.
 
 **Status:** Stage 4.4 read-only code implemented; live validation pending.
+
+
+## Level 1 Stage 4.4.1 — actual DNS and cross-node traffic
+
+Active traffic verification is available through the same Level 1 entry point,
+but **requires an additional `-NetworkTest` opt-in** and the existing lab
+deployment approval. The default `-Reconcile` (including approved apply)
+performs no diagnostic Pod creation, preserving zero-change idempotence.
+
+```powershell
+.\infrastructure\ansible\Invoke-SentinelReadiness.ps1 `
+  -ConfigRepo "C:\Sentinel\config-readonly" -Reconcile `
+  -NetworkTest -ReconcileApprovalToken "DEPLOY_SENTINEL_LEVEL1_LAB"
+```
+
+The pipeline first reconciles/verifies Flannel and worker registration, then
+executes the read-only Stage 4.4 baseline. The optional active networking
+playbook creates a unique `sentinel-netcheck-<random>` namespace with two
+nonprivileged, resource-limited diagnostic Pods pinned to different nodes and
+one isolated ClusterIP test Service. It tests live Kubernetes DNS from both
+Pods, direct HTTP connectivity in both directions, and Service DNS/ClusterIP
+routing. It asserts exact per-run HTTP response markers, then removes only
+the namespace it created, after checking its ownership labels. Cleanup runs
+even when an active probe fails after namespace creation.
+
+**Limits:** A successful test proves this run's DNS and HTTP datapaths, not
+arbitrary applications, external network connectivity or recovery after node
+failure. A failed cleanup is a blocking error requiring review of the uniquely
+named test namespace. The BusyBox diagnostic image is currently constrained
+to version `1.37.0` but is not yet digest-locked; promote a reviewed immutable
+image digest before expanding this test outside the private lab.
+
+**Status:** Code and CI validation only until a live approved network test
+is executed and the output and cleanup are verified.
