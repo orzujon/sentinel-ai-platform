@@ -106,7 +106,7 @@
     - name: Require installed certificate and GPG tooling before any changes
       ansible.builtin.command:
         argv: [dpkg-query, -W, "-f=${Status}", "{{ item }}"]
-      loop: [ca-certificates, gpg]
+      loop: [ca-certificates, gpg, python3-apt]
       register: sentinel_crypto_packages
       changed_when: false
 
@@ -114,7 +114,7 @@
       ansible.builtin.assert:
         that:
           - sentinel_crypto_packages.results | map(attribute='stdout') | unique | list == ['install ok installed']
-        fail_msg: "BLOCKED: missing package source trust prerequisites"
+        fail_msg: "BLOCKED: missing TLS/GPG/python3-apt prerequisites; do not auto-install packages"
 
 - name: Register approved Kubernetes APT source without installing Kubernetes
   hosts: sentinel_sandbox
