@@ -19,7 +19,7 @@ if ([string]::IsNullOrWhiteSpace($verifySection)) { throw 'Stage 5 verification 
 foreach ($prohibited in @('-ReconcileApprovalToken','-NetworkTest','New-VM','Remove-VM','Stop-VM','kubeadm init','kubeadm reset')) {
     if ($verifySection.Contains($prohibited)) { throw "Forbidden mutating operation in verification: $prohibited" }
 }
-if ($module -notmatch "stage='kubernetes-readonly'" -or $module -notmatch "mutating = \$false") {
+if ($module -notmatch "stage='kubernetes-readonly'" -or $module -notmatch 'mutating = \$false') {
     throw 'Stage 5 verification report or read-only contract missing'
 }
 Write-Host 'PASS: Stage 5.2 existing-lab verification safely chains read-only controls'
