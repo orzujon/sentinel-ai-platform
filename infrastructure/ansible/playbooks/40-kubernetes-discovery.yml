@@ -18,6 +18,9 @@
         fail_msg: "BLOCKED: unsupported guest platform"
 
     - name: Inspect Kubernetes initialization markers
+      # The CNI directory is root-protected on Ubuntu; use privilege only
+      # for this read-only stat operation, not for the full discovery play.
+      become: true
       ansible.builtin.stat:
         path: "{{ item }}"
         follow: false
@@ -59,6 +62,9 @@
       failed_when: false
 
     - name: Inspect CRI plugins
+      # containerd's Unix socket is normally root-owned/restricted.
+      # Avoid misdiagnosing a permission error as a broken CRI plugin.
+      become: true
       ansible.builtin.command:
         argv: [ctr, plugins, ls]
       register: sentinel_cri_plugins
