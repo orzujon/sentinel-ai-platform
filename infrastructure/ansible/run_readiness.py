@@ -333,6 +333,7 @@ def main(argv=None) -> int:
     parser.add_argument("--reconcile", action="store_true",
                         help="Single desired-state verification and Flannel reconciliation")
     parser.add_argument("--reconcile-approval-token", default=None)
+    parser.add_argument("--network-test", action="store_true")
     args = parser.parse_args(argv)
 
     try:
@@ -345,6 +346,8 @@ def main(argv=None) -> int:
             bool(args.plan_flannel), bool(args.apply_flannel), bool(args.reconcile),
         )) > 1:
             raise Stage4Blocked("Choose exactly one Stage 4.2 or 4.3 mode")
+        if args.network_test and (not args.reconcile or args.reconcile_approval_token != "DEPLOY_SENTINEL_LEVEL1_LAB"):
+            raise Stage4Blocked("Active networking tests require approved desired-state reconciliation")
         if args.reconcile:
             if args.reconcile_approval_token not in (None, "DEPLOY_SENTINEL_LEVEL1_LAB"):
                 raise Stage4Blocked("Invalid environment-scoped Level 1 deployment approval")
@@ -575,6 +578,8 @@ def main(argv=None) -> int:
                               "--mode", "apply" if args.reconcile_approval_token else "plan"]
             if args.reconcile_approval_token:
                 args_reconcile.append("--approved")
+            if args.network_test:
+                args_reconcile.append("--network-test")
             checked_command(args_reconcile, stage="Level 1 Flannel desired-state reconciliation")
             print("SENTINEL_RECONCILED: review the private audit and Kubernetes node readiness", flush=True)
         if args.apply_flannel:
