@@ -84,8 +84,10 @@ def reconcile(*, inventory: Path, environment: str, mode: str, approval: bool,
         os.chmod(root, 0o700)
         asset = root / "kube-flannel.yml"
         retrieve_verified_release(release["version"], release["digest"], asset)
-        report = root / "result.json"
-        playbook = Path(__file__).resolve().parent / "playbooks" / "120-reconcile-flannel.yml"
+        playbooks = [
+            ("flannel", Path(__file__).resolve().parent / "playbooks" / "120-reconcile-flannel.yml"),
+            ("worker", Path(__file__).resolve().parent / "playbooks" / "130-reconcile-worker.yml"),
+        ]
         variables = {
             "sentinel_reconcile_mode": mode,
             "sentinel_reconcile_approved": approval,
@@ -93,18 +95,26 @@ def reconcile(*, inventory: Path, environment: str, mode: str, approval: bool,
             "sentinel_flannel_sha256": release["digest"],
             "sentinel_flannel_artifact": str(asset),
         }
-        command = ["ansible-playbook", "-i", str(inventory), "-e", json.dumps(variables), str(playbook)]
         print(f"RECONCILE_TARGET: env={environment} flannel={release['version']} artifact_sha256={release['digest']} mode={mode}", flush=True)
-        completed = subprocess.run(command, check=False)
-        # Keep an audit record of the exact run, including failure.
+        results = []
+        for stage, playbook in playbooks:
+            command = ["ansible-playbook", "-i", str(inventory),
+                       "-e", json.dumps(variables), str(playbook)]
+            print(f"RECONCILE_STAGE: {stage} mode={mode}", flush=True)
+            completed = subprocess.run(command, check=False)
+            results.append({"stage": stage, "exitCode": completed.returncode})
+            if completed.returncode:
+                break
+        success = len(results) == len(playbooks) and all(item["exitCode"] == 0 for item in results)
+        # Keep a private audit of all executed stages, including failure.
         audit = state_root / ("reconcile-" + next(tempfile._get_candidate_names()) + ".json")
         fd = os.open(audit, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as output:
             json.dump({"environment": environment, "mode": mode, "release": release,
-                       "status": "success" if completed.returncode == 0 else "failed",
-                       "exitCode": completed.returncode}, output, indent=2)
-        if completed.returncode:
-            raise ReconcileError(f"Flannel reconciliation failed ({completed.returncode}); audit={audit}")
+                       "status": "success" if success else "failed",
+                       "stages": results, "exitCode": results[-1]["exitCode"]}, output, indent=2)
+        if not success:
+            raise ReconcileError(f"Level 1 reconciliation stage {results[-1]['stage']} failed ({results[-1]['exitCode']}); audit={audit}")
         print(f"RECONCILE_SUCCESS: audit={audit}", flush=True)
         return audit
 
