@@ -45,6 +45,8 @@ jobs:
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/80-kubernetes-package-install.yml
       - name: Validate Stage 4.3.3 guarded control-plane initialization syntax
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/90-kubeadm-control-plane.yml
+      - name: Validate Stage 4.3.4 read-only Flannel plan syntax
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/100-flannel-release-plan.yml
       - name: Compile Python management runner
         run: python -m py_compile infrastructure/ansible/run_readiness.py
       - name: Execute Level 1 static package tests
