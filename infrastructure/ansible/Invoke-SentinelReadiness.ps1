@@ -14,6 +14,9 @@ param(
     [switch]$DiscoverKubernetes,
     [switch]$PlanKubernetesPackages,
     [switch]$ConfigureKubernetesRepo,
+    [switch]$PlanKubernetesInstall,
+    [switch]$InstallKubernetesPackages,
+    [string]$InstallApprovalToken,
     [string]$RepositoryApprovalToken
 )
 
@@ -28,9 +31,18 @@ $selectedModeCount = [int]$PlanBaseline.IsPresent +
     [int]$RebootValidate.IsPresent +
     [int]$DiscoverKubernetes.IsPresent +
     [int]$PlanKubernetesPackages.IsPresent +
-    [int]$ConfigureKubernetesRepo.IsPresent
+    [int]$ConfigureKubernetesRepo.IsPresent +
+    [int]$PlanKubernetesInstall.IsPresent +
+    [int]$InstallKubernetesPackages.IsPresent
 if ($selectedModeCount -gt 1) {
     throw 'BLOCKED: choose exactly one Stage 4.2 or 4.3 mode'
+}
+if ($InstallKubernetesPackages.IsPresent) {
+    if ($InstallApprovalToken -cne 'INSTALL_SENTINEL_STAGE432_K8S_1372') {
+        throw 'BLOCKED: separate Kubernetes package installation approval missing'
+    }
+} elseif ($InstallApprovalToken) {
+    throw 'BLOCKED: installation token only valid with -InstallKubernetesPackages'
 }
 if ($ConfigureKubernetesRepo.IsPresent) {
     if ($RepositoryApprovalToken -cne 'CONFIGURE_SENTINEL_STAGE432_K8S_REPO') {
@@ -136,6 +148,12 @@ if ($DiscoverKubernetes.IsPresent) {
 if ($PlanKubernetesPackages.IsPresent) {
     $wslArgs += '--plan-kubernetes-packages'
 }
+if ($PlanKubernetesInstall.IsPresent) {
+    $wslArgs += '--plan-kubernetes-install'
+}
+if ($InstallKubernetesPackages.IsPresent) {
+    $wslArgs += @('--install-kubernetes-packages', '--install-approval-token', $InstallApprovalToken)
+}
 if ($ConfigureKubernetesRepo.IsPresent) {
     $wslArgs += @('--configure-kubernetes-repo', '--repository-approval-token', $RepositoryApprovalToken)
 }
@@ -150,6 +168,10 @@ if ($ApplyBaseline.IsPresent) {
     Write-Host 'PASS: Stage 4.2 reboot persistence verification completed on both sandbox guests.'
 } elseif ($DiscoverKubernetes.IsPresent) {
     Write-Host 'PASS: Stage 4.3.1 Kubernetes discovery completed without modifying guests.'
+} elseif ($PlanKubernetesInstall.IsPresent) {
+    Write-Host 'PASS: Stage 4.3.2 read-only pinned package installation simulation passed.'
+} elseif ($InstallKubernetesPackages.IsPresent) {
+    Write-Host 'PASS: Stage 4.3.2 Kubernetes packages installed and held; cluster not initialized.'
 } elseif ($PlanKubernetesPackages.IsPresent) {
     Write-Host 'PASS: Stage 4.3.2 read-only Kubernetes package-source plan complete.'
 } elseif ($ConfigureKubernetesRepo.IsPresent) {
