@@ -29,4 +29,5 @@ $wrapper = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\Invoke-Sentinel
 if ($wrapper -notmatch 'wsl\.exe @wslArgs 2>&1' -or $wrapper -notmatch '\$exitCode = \$LASTEXITCODE') {
     throw 'Native stderr handling or exit-code gate missing from actual wrapper'
 }
+$global:LASTEXITCODE = 0
 Write-Host 'PASS: native stderr warnings are loggable; real process failures remain blocked'
