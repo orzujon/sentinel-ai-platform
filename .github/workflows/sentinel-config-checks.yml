@@ -84,6 +84,9 @@ jobs:
       - name: Verify native stderr warning logging and true process failure detection
         shell: powershell
         run: .\infrastructure\ansible\tests\Test-NativeStderrCapture.ps1
+      - name: Test Stage 5 bootstrap route classification without Hyper-V
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-BootstrapPlan.ps1
       - name: Parse all Level 1 PowerShell modules and verify isolation checks
         shell: powershell
         run: .\infrastructure\level1\tests\Test-StaticSafety.ps1
