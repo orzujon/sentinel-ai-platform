@@ -1,6 +1,6 @@
 # Stage 4.3.1 — Kubernetes discovery (read-only)
 
-**Status: Stage 4.3.1 verified on both sandbox guests (2026-10-31); Stage 4.3.2 read-only package-source plan pending local validation.**
+**Status (2026-10-31): Stage 4.3.1 verified; Stage 4.3.2 repository bootstrap executed successfully on both sandbox guests. Kubernetes packages remain uninstalled. The next read-only installation simulation is implemented but awaits local execution.**
 Do not install Kubernetes packages, call `kubeadm init`/`join`, apply
 Flannel, modify network settings or touch existing protected VMs in this step.
 
@@ -203,3 +203,43 @@ Official references:
 - https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/
 - https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/
 - https://github.com/flannel-io/flannel/blob/master/Documentation/kubernetes.md
+
+## Stage 4.3.2 — next gate: pinned package installation simulation
+
+The approved signed repository bootstrap completed on both isolated guests with
+`kubeadm`, `kubelet` and `kubectl` each reporting candidate
+`1.37.2-1.1`. This is newer than the initial v1.37.1 proposal. Installation
+is **not** yet approved and no Kubernetes packages have been installed.
+
+Run the **read-only** simulation from the public repository checkout:
+
+```powershell
+git pull --ff-only origin feature/stage43-kubernetes-discovery
+.\infrastructure\ansible\Invoke-SentinelReadiness.ps1 `
+  -ConfigRepo "C:\Sentinel\config-readonly" `
+  -PlanKubernetesInstall
+```
+
+This reuses the pinned private inventory and existing SSH trust, validates
+both nodes, checks the existing signing key fingerprint and signed repo,
+requires the exact three package candidates, rejects existing package state,
+runs `apt-get -s` to inspect the dependency transaction, rejects removals,
+and saves private controller-local 0600 simulation reports. No guest package
+installation or repository refresh is performed.
+
+**Stop for review of BOTH private reports** (especially every `Inst`
+entry). A simulation cannot guarantee the absence of package maintainer-script
+side effects and is not an authorization to proceed.
+
+An additional `-InstallKubernetesPackages` mode is implemented behind a
+separate literal approval token. **Do not invoke it until the read-only plan
+passes, dependency changes have been reviewed, and CI/local safety tests pass.**
+The install uses the exact pinned `1.37.2-1.1` revision, processes one guest
+at a time, applies package holds, and checks versions. It deliberately does
+not run kubeadm init/join or apply a CNI. It is first-install only and will
+reject a repeated invocation once Kubernetes packages exist. Recovery and
+post-install observation must be reviewed before further work.
+
+Stage 4.3.3 (control-plane initialization) remains blocked on CIDR review
+outside the guests, selected private NIC IPs, firewall verification, and
+separate bootstrap design and approval.
