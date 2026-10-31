@@ -43,8 +43,20 @@
       register: marker
     - name: Determine whether release is already managed
       ansible.builtin.set_fact:
-        sentinel_existing_ds: "{{ ds.stdout | trim != '' }}"
-        sentinel_release_matches: "{{ (marker.stdout | from_json).get('metadata', {}).get('annotations', {}).get('sentinel.ai/manifest-sha256') == sentinel_flannel_sha256 if marker.stdout | trim else false }}"
+        # kubectl --ignore-not-found -o json can return {} on missing resources.
+        # Only a typed DaemonSet counts as existing; non-empty stdout does not.
+        sentinel_ds_object: "{{ (ds.stdout | default('{}', true) | from_json) }}"
+        sentinel_namespace_object: "{{ (marker.stdout | default('{}', true) | from_json) }}"
+    - name: Require Kubernetes discovery responses to have expected resource kinds
+      ansible.builtin.assert:
+        that:
+          - sentinel_ds_object == {} or (sentinel_ds_object.kind | default('')) == 'DaemonSet'
+          - sentinel_namespace_object == {} or (sentinel_namespace_object.kind | default('')) == 'Namespace'
+        fail_msg: Unexpected Kubernetes resource discovery response; refusing to reconcile
+    - name: Determine current release from parsed Kubernetes objects
+      ansible.builtin.set_fact:
+        sentinel_existing_ds: "{{ (sentinel_ds_object.kind | default('')) == 'DaemonSet' }}"
+        sentinel_release_matches: "{{ sentinel_namespace_object.get('metadata', {}).get('annotations', {}).get('sentinel.ai/manifest-sha256') == sentinel_flannel_sha256 }}"
     - name: Refuse to adopt unmanaged existing workloads or silently change releases
       ansible.builtin.assert:
         that:
