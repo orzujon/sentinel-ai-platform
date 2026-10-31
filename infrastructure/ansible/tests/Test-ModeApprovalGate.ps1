@@ -109,4 +109,11 @@ Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Argumen
     PlanControlPlane = $true
     InitControlPlane = $true
 }
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    PlanFlannel = $true
+}
+Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Arguments @{
+    PlanFlannel = $true
+    PlanControlPlane = $true
+}
 Write-Host "PASS: Stage 4.2 mode and approval preflight smoke tests"
