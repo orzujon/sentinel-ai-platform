@@ -319,6 +319,11 @@ def main(argv=None) -> int:
     parser.add_argument("--install-kubernetes-packages", action="store_true",
                         help="Explicitly approved pinned Kubernetes package installation")
     parser.add_argument("--install-approval-token", default=None)
+    parser.add_argument("--plan-control-plane", action="store_true",
+                        help="Validate kubeadm initialization config without modifying guests")
+    parser.add_argument("--init-control-plane", action="store_true",
+                        help="Explicitly approved first-time control-plane init")
+    parser.add_argument("--control-plane-approval-token", default=None)
     args = parser.parse_args(argv)
 
     try:
@@ -327,8 +332,14 @@ def main(argv=None) -> int:
             bool(args.reboot_validate), bool(args.discover_kubernetes),
             bool(args.plan_kubernetes_packages), bool(args.configure_kubernetes_repo),
             bool(args.plan_kubernetes_install), bool(args.install_kubernetes_packages),
+            bool(args.plan_control_plane), bool(args.init_control_plane),
         )) > 1:
             raise Stage4Blocked("Choose exactly one Stage 4.2 or 4.3 mode")
+        if args.init_control_plane:
+            if args.control_plane_approval_token != "INITIALIZE_SENTINEL_STAGE433_CONTROL_PLANE":
+                raise Stage4Blocked("Missing explicit Stage 4.3.3 control-plane approval")
+        elif args.control_plane_approval_token is not None:
+            raise Stage4Blocked("Control-plane approval token is valid only in init mode")
         if args.install_kubernetes_packages:
             if args.install_approval_token != "INSTALL_SENTINEL_STAGE432_K8S_1372":
                 raise Stage4Blocked("Missing separate Kubernetes installation approval")
@@ -533,6 +544,20 @@ def main(argv=None) -> int:
                     "networking survived reboot on all sandbox guests",
                     flush=True,
                 )
+        if args.plan_control_plane or args.init_control_plane:
+            if len(machines) != 2 or {m["role"] for m in machines} != {"control-plane", "worker"}:
+                raise Stage4Blocked("Stage 4.3.3 accepts only the two-node pinned sandbox")
+            cp = Path(__file__).resolve().parent / "playbooks" / "90-kubeadm-control-plane.yml"
+            checked_command(["ansible-playbook", "-i", str(inventory_path),
+                             "--syntax-check", str(cp)], stage="Control-plane playbook syntax")
+            mode = "apply" if args.init_control_plane else "plan"
+            if mode == "apply":
+                print("APPROVED STAGE433: initializing only the existing sandbox control plane", flush=True)
+            checked_command(["ansible-playbook", "-i", str(inventory_path),
+                             "-e", json.dumps({"sentinel_kubeadm_mode": mode,
+                                               "sentinel_cp_init_approved": mode == "apply"}),
+                             str(cp)], stage="Stage 4.3.3 control-plane " + mode)
+            print("STAGE433_" + ("INITIALIZED" if mode == "apply" else "PLAN_READY"), flush=True)
         if args.plan_kubernetes_install or args.install_kubernetes_packages:
             if len(machines) != 2 or {m["role"] for m in machines} != {"control-plane", "worker"}:
                 raise Stage4Blocked("Kubernetes package installation requires the pinned two-node sandbox")
