@@ -1,0 +1,83 @@
+---
+# Approved Stage 4.3.2 package installation ONLY. No init/join or network changes.
+- name: Preflight BOTH guests before any package changes
+  hosts: sentinel_sandbox
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require controller approval
+      ansible.builtin.assert:
+        that:
+          - sentinel_k8s_install_approved is defined
+          - sentinel_k8s_install_approved is sameas true
+          - sentinel_k8s_version == '1.37.2-1.1'
+    - name: Require reviewed exact signed repository source
+      ansible.builtin.command: cat /etc/apt/sources.list.d/kubernetes.list
+      changed_when: false
+      register: source
+    - name: Check source
+      ansible.builtin.assert:
+        that:
+          - source.stdout == 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.37/deb/ /'
+    - name: Check package state
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Status}", "{{ item }}"]
+      loop: [kubeadm, kubelet, kubectl]
+      register: already
+      changed_when: false
+      failed_when: false
+    - name: Require first-install state only
+      ansible.builtin.assert:
+        that:
+          - already.results | map(attribute='rc') | list == [1, 1, 1]
+    - name: Simulate pinned installation
+      become: true
+      ansible.builtin.command:
+        argv: [apt-get, -s, install, --no-install-recommends, "kubeadm=1.37.2-1.1", "kubelet=1.37.2-1.1", "kubectl=1.37.2-1.1"]
+      changed_when: false
+      register: simulation
+    - name: Forbid unexpected removal in simulation
+      ansible.builtin.assert:
+        that:
+          - simulation.stdout is not search('(?m)^Rem ')
+- name: Install pinned packages one sandbox guest at a time
+  hosts: sentinel_sandbox
+  gather_facts: false
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Install reviewed exact Kubernetes packages
+      ansible.builtin.apt:
+        name:
+          - kubeadm=1.37.2-1.1
+          - kubelet=1.37.2-1.1
+          - kubectl=1.37.2-1.1
+        state: present
+        install_recommends: false
+        allow_downgrade: false
+    - name: Hold Kubernetes packages to prevent unintended upgrades
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop: [kubeadm, kubelet, kubectl]
+    - name: Verify installed version
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Version}", "{{ item }}"]
+      loop: [kubeadm, kubelet, kubectl]
+      register: versions
+      changed_when: false
+    - name: Assert pinned version on all packages
+      ansible.builtin.assert:
+        that:
+          - versions.results | map(attribute='stdout') | unique | list == ['1.37.2-1.1']
+    - name: Verify package holds
+      ansible.builtin.command: apt-mark showhold
+      register: holds
+      changed_when: false
+    - name: Assert holds applied
+      ansible.builtin.assert:
+        that:
+          - "'kubeadm' in holds.stdout_lines"
+          - "'kubelet' in holds.stdout_lines"
+          - "'kubectl' in holds.stdout_lines"
