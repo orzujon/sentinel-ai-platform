@@ -116,4 +116,18 @@ Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Argumen
     PlanFlannel = $true
     PlanControlPlane = $true
 }
+Assert-BlockedWith -Contains "separate Flannel deployment approval is missing" -Arguments @{
+    ApplyFlannel = $true
+}
+Assert-BlockedWith -Contains "exact reviewed Flannel SHA256 is required" -Arguments @{
+    ApplyFlannel = $true
+    FlannelApprovalToken = "APPLY_SENTINEL_STAGE434_FLANNEL_02810"
+}
+Assert-BlockedWith -Contains "Flannel approval and checksum only valid" -Arguments @{
+    FlannelSha256 = ("a" * 64)
+}
+Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Arguments @{
+    PlanFlannel = $true
+    ApplyFlannel = $true
+}
 Write-Host "PASS: Stage 4.2 mode and approval preflight smoke tests"
