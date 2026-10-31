@@ -221,6 +221,41 @@ def check_kubernetes_discovery_report(data: dict, *, target_ip: str,
     return package_candidates
 
 
+# Pinned minor-scoped repository; patch is a candidate until signed APT
+# metadata confirms the *exact* distro package version on both nodes.
+STAGE432_MINOR = "v1.37"
+STAGE432_PATCH_CANDIDATE = "v1.37.1"
+STAGE432_REPO_URL = "https://pkgs.k8s.io/core:/stable:/v1.37/deb/"
+
+
+def validate_kubernetes_package_source_plan(data: dict) -> dict:
+    fields = {
+        "aptSourceExists", "aptKeyringExists", "caCertificatesInstalled",
+        "curlInstalled", "gpgInstalled", "packageHolds", "repoTlsReachable",
+    }
+    if not isinstance(data, dict) or set(data) != fields:
+        raise Stage4Blocked("Unexpected Kubernetes APT source plan report")
+    for name in fields - {"packageHolds"}:
+        if type(data[name]) is not bool:
+            raise Stage4Blocked("Malformed Kubernetes APT source inspection")
+    if not isinstance(data["packageHolds"], list) or not all(
+        isinstance(x, str) and len(x) < 150 for x in data["packageHolds"]
+    ):
+        raise Stage4Blocked("Malformed APT package hold inspection")
+    if data["aptSourceExists"] or data["aptKeyringExists"]:
+        raise Stage4Blocked("Kubernetes APT source/keyring already exists; review before overwriting")
+    if not data["repoTlsReachable"]:
+        raise Stage4Blocked("Cannot reach the official HTTPS Kubernetes package source")
+    if not data["caCertificatesInstalled"]:
+        raise Stage4Blocked("Ubuntu CA trust bundle unavailable for signed source")
+    if any(x in {"kubeadm", "kubelet", "kubectl"} for x in data["packageHolds"]):
+        raise Stage4Blocked("Existing Kubernetes package holds require manual investigation")
+    return {
+        "curlAvailable": data["curlInstalled"],
+        "gpgAvailable": data["gpgInstalled"],
+    }
+
+
 def checked_command(args: list[str], *, stage: str) -> None:
     outcome = subprocess.run(args, check=False)
     if outcome.returncode:
@@ -264,14 +299,20 @@ def main(argv=None) -> int:
         action="store_true",
         help="Stage 4.3.1 Kubernetes readiness, networking and package metadata inspection; guest read-only"
     )
+    parser.add_argument(
+        "--plan-kubernetes-packages",
+        action="store_true",
+        help="Read-only Stage 4.3.2 signed source reachability and package plan"
+    )
     args = parser.parse_args(argv)
 
     try:
         if sum((
             bool(args.plan_baseline), bool(args.apply_baseline),
             bool(args.reboot_validate), bool(args.discover_kubernetes),
+            bool(args.plan_kubernetes_packages),
         )) > 1:
-            raise Stage4Blocked("Choose plan, apply, reboot or Kubernetes discovery, not multiple modes")
+            raise Stage4Blocked("Choose exactly one Stage 4.2 or 4.3 mode")
         if args.reboot_validate:
             if args.reboot_approval_token != REBOOT_APPROVAL:
                 raise Stage4Blocked("Explicit sandbox reboot approval is missing")
@@ -466,7 +507,7 @@ def main(argv=None) -> int:
                     "networking survived reboot on all sandbox guests",
                     flush=True,
                 )
-        if args.discover_kubernetes:
+        if args.discover_kubernetes or args.plan_kubernetes_packages:
             if len(machines) != 2 or {m["role"] for m in machines} != {"control-plane", "worker"}:
                 raise Stage4Blocked("Stage 4.3 accepts exactly one control plane and one worker")
             discovery43 = (
@@ -531,6 +572,51 @@ def main(argv=None) -> int:
             )
             print(f"PRIVATE_REPORT: {report_dir}", flush=True)
             print("STAGE43_DISCOVERED: guests inspected; remote changes=0; no packages installed", flush=True)
+            if args.plan_kubernetes_packages:
+                source_plan = Path(__file__).resolve().parent / "playbooks" / "50-kubernetes-package-source-plan.yml"
+                checked_command(
+                    ["ansible-playbook", "-i", str(inventory_path),
+                     "--syntax-check", str(source_plan)],
+                    stage="Stage 4.3.2 package-source plan syntax"
+                )
+                source_dir = Path(tempfile.mkdtemp(
+                    prefix=f"k8s-source-{args.environment}-{args.revision[:12]}-",
+                    dir=state,
+                ))
+                checked_command(
+                    ["ansible-playbook", "-i", str(inventory_path),
+                     "-e", json.dumps({"sentinel_report_root": str(source_dir)}),
+                     str(source_plan)],
+                    stage="Stage 4.3.2 read-only package source inspection"
+                )
+                print("\nSENTINEL STAGE 4.3.2 PACKAGE PLAN — READ ONLY", flush=True)
+                for machine in machines:
+                    source_file = source_dir / f"{machine['name']}.json"
+                    if not source_file.is_file() or source_file.is_symlink():
+                        raise Stage4Blocked("Missing package source report")
+                    if source_file.stat().st_size > 50_000 or (source_file.stat().st_mode & 0o077):
+                        raise Stage4Blocked("Insecure or oversized package source report")
+                    source_data = json.loads(source_file.read_text(encoding="utf-8"))
+                    tools_status = validate_kubernetes_package_source_plan(source_data)
+                    print(
+                        f"Node {machine['role']}: official HTTPS reachable | "
+                        f"existing Kubernetes source/keyring=no | "
+                        f"curl={'ready' if tools_status['curlAvailable'] else 'missing'} "
+                        f"gpg={'ready' if tools_status['gpgAvailable'] else 'missing'}",
+                        flush=True,
+                    )
+                print(
+                    f"VERSION_PROPOSAL: Kubernetes minor={STAGE432_MINOR} "
+                    f"patch candidate={STAGE432_PATCH_CANDIDATE}; exact APT package revision "
+                    "NOT YET VERIFIED",
+                    flush=True,
+                )
+                print(f"REPOSITORY_PROPOSAL: {STAGE432_REPO_URL}", flush=True)
+                print("PLAN_ONLY: configure verified signed-by keyring, add minor-specific APT repo, "
+                      "refresh indexes, confirm exact signed package versions on both nodes, "
+                      "approve pinned installation and hold packages in a later step.", flush=True)
+                print(f"PRIVATE_REPORT: {source_dir}", flush=True)
+                print("STAGE432_PLAN_READY: packages installed=0, guest configuration changes=0", flush=True)
         print("STAGE4_READY: guest readiness checks passed; configuration changes depend on selected mode")
         return 0
     except (Stage4Blocked, OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
