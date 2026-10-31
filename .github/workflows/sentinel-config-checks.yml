@@ -81,6 +81,9 @@ jobs:
       - name: Exercise Stage 4.2 mode and approval gates (without any VM connections)
         shell: powershell
         run: .\\infrastructure\\ansible\\tests\\Test-ModeApprovalGate.ps1
+      - name: Verify native stderr warning logging and true process failure detection
+        shell: powershell
+        run: .\infrastructure\ansible\tests\Test-NativeStderrCapture.ps1
       - name: Parse all Level 1 PowerShell modules and verify isolation checks
         shell: powershell
         run: .\infrastructure\level1\tests\Test-StaticSafety.ps1
