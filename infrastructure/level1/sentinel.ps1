@@ -22,12 +22,38 @@ $ErrorActionPreference = 'Stop'
 
 # Stage 5 entry point: classify existing or clean sandbox, with no mutation.
 if ($Command -eq 'bootstrap-plan') {
-    if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { throw "Configuration missing: $ConfigPath" }
-    $bootstrapConfig = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+    # Stage 5 planning uses immutable, public-safe sandbox identity and needs
+    # no local credentials or legacy Stage 1-3 JSON. A supplied config may
+    # supplement future phases, but never overrides the pinned identity.
+    $bootstrapConfig = [pscustomobject]@{
+        lab = 'sentinel-l1-sandbox'
+        mode = 'isolated-sandbox'
+        network = [pscustomobject]@{ switch = 'Sentinel-L1'; type = 'Internal' }
+        paths = [pscustomobject]@{ vmRoot = 'C:\Sentinel\Level1-Sandbox\VMs' }
+        vms = @(
+            [pscustomobject]@{ name = 'sentinel-l1-cp01' },
+            [pscustomobject]@{ name = 'sentinel-l1-w01' }
+        )
+        protection = [pscustomobject]@{ vmNames = @('k8s-cp01','k8s-w01') }
+    }
+    $bootstrapSource = 'pinned-sandbox-contract'
+    if (Test-Path -LiteralPath $ConfigPath -PathType Leaf) {
+        $provided = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+        if ($provided.lab -cne $bootstrapConfig.lab -or
+            $provided.mode -cne $bootstrapConfig.mode -or
+            $provided.network.switch -cne $bootstrapConfig.network.switch -or
+            $provided.network.type -cne $bootstrapConfig.network.type -or
+            $provided.paths.vmRoot -cne $bootstrapConfig.paths.vmRoot -or
+            ((@($provided.vms | ForEach-Object { $_.name }) | Sort-Object) -join ',') -cne
+            ((@($bootstrapConfig.vms | ForEach-Object { $_.name }) | Sort-Object) -join ',')) {
+            throw 'BLOCKED: supplied legacy config disagrees with the pinned Stage 5 sandbox identity'
+        }
+        $bootstrapSource = $ConfigPath
+    }
     $bootstrapRun = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8)
     $bootstrapDir = Join-Path (Join-Path $PSScriptRoot 'runs') $bootstrapRun
     Import-Module (Join-Path $PSScriptRoot 'src\Sentinel.Bootstrap.psm1') -Force
-    $bootstrapResult = Invoke-SentinelBootstrapPlan -Config $bootstrapConfig -RunDirectory $bootstrapDir -ConfigPath $ConfigPath
+    $bootstrapResult = Invoke-SentinelBootstrapPlan -Config $bootstrapConfig -RunDirectory $bootstrapDir -ConfigPath $bootstrapSource
     Write-Host "Sentinel Level 1 Stage 5 bootstrap plan: $($bootstrapResult.Result)"
     Write-Host "Route: $($bootstrapResult.Route)"
     Write-Host "Reason: $($bootstrapResult.Reason)"
