@@ -117,6 +117,8 @@ if ($ApplyBaseline.IsPresent) {
     Write-Host 'APPROVED APPLY MODE: Stage 4.2 will change the sandbox guests.'
 } elseif ($RebootValidate.IsPresent) {
     Write-Host 'APPROVED REBOOT MODE: Stage 4.2 will reboot both sandbox VMs sequentially.'
+} elseif ($InstallKubernetesPackages.IsPresent) {
+    Write-Host 'APPROVED PACKAGE INSTALL: pinned kubeadm, kubelet and kubectl will be installed and held on both sandbox guests.'
 } elseif ($ConfigureKubernetesRepo.IsPresent) {
     Write-Host 'APPROVED REPOSITORY MODE: Stage 4.3.2 will add the signed Kubernetes APT source and refresh package indexes. Kubernetes packages will not be installed.'
 } else {
