@@ -19,6 +19,27 @@
       ansible.builtin.assert:
         that:
           - source.stdout == 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.37/deb/ /'
+    - name: Verify signing key fingerprint
+      ansible.builtin.command:
+        argv: [gpg, --batch, --show-keys, --with-colons, /etc/apt/keyrings/kubernetes-apt-keyring.gpg]
+      changed_when: false
+      register: key
+    - name: Assert signing identity unchanged
+      ansible.builtin.assert:
+        that:
+          - key.stdout is search('(?m)^fpr:::::::::DE15B14486CD377B9E876E1A234654DA9A296436:')
+    - name: Check exact package candidate origin
+      ansible.builtin.command:
+        argv: [apt-cache, policy, "{{ item }}"]
+      loop: [kubeadm, kubelet, kubectl]
+      changed_when: false
+      register: policies
+    - name: Assert exact signed candidate exists
+      ansible.builtin.assert:
+        that:
+          - item.stdout is search('Candidate: 1[.]37[.]2-1[.]1')
+          - item.stdout is search('pkgs[.]k8s[.]io/core:/stable:/v1[.]37/deb/')
+      loop: "{{ policies.results }}"
     - name: Check package state
       ansible.builtin.command:
         argv: [dpkg-query, -W, "-f=${Status}", "{{ item }}"]
@@ -40,6 +61,9 @@
       ansible.builtin.assert:
         that:
           - simulation.stdout is not search('(?m)^Rem ')
+          - simulation.stdout is search('(?m)^Inst kubeadm ')
+          - simulation.stdout is search('(?m)^Inst kubelet ')
+          - simulation.stdout is search('(?m)^Inst kubectl ')
 - name: Install pinned packages one sandbox guest at a time
   hosts: sentinel_sandbox
   gather_facts: false
