@@ -17,6 +17,7 @@ param(
     [switch]$PlanKubernetesInstall,
     [switch]$InstallKubernetesPackages,
     [switch]$Reconcile,
+    [switch]$NetworkTest,
     [string]$ReconcileApprovalToken,
     [switch]$PlanFlannel,
     [switch]$ApplyFlannel,
@@ -50,6 +51,9 @@ $selectedModeCount = [int]$PlanBaseline.IsPresent +
     [int]$Reconcile.IsPresent
 if ($selectedModeCount -gt 1) {
     throw 'BLOCKED: choose exactly one Stage 4.2 or 4.3 mode'
+}
+if ($NetworkTest.IsPresent -and (-not $Reconcile.IsPresent -or $ReconcileApprovalToken -cne 'DEPLOY_SENTINEL_LEVEL1_LAB')) {
+    throw 'BLOCKED: -NetworkTest requires -Reconcile and the explicit lab deployment approval'
 }
 if ($Reconcile.IsPresent) {
     if ($ReconcileApprovalToken -and $ReconcileApprovalToken -cne 'DEPLOY_SENTINEL_LEVEL1_LAB') {
@@ -196,6 +200,9 @@ if ($PlanKubernetesPackages.IsPresent) {
 }
 if ($Reconcile.IsPresent) {
     $wslArgs += '--reconcile'
+    if ($NetworkTest.IsPresent) {
+        $wslArgs += '--network-test'
+    }
     if ($ReconcileApprovalToken) {
         $wslArgs += @('--reconcile-approval-token', $ReconcileApprovalToken)
     }
