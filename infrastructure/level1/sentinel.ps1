@@ -12,14 +12,66 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('preflight','runs','image-discover','prepare-images','verify-image','infra-plan','infra-provision','infra-verify')]
+    [ValidateSet('preflight','runs','image-discover','prepare-images','verify-image','infra-plan','infra-provision','infra-verify','bootstrap-plan','bootstrap-verify')]
     [string]$Command = 'preflight',
-    [string]$ConfigPath = (Join-Path $PSScriptRoot 'config\lab.json')
+    [string]$ConfigPath = (Join-Path $PSScriptRoot 'config\lab.json'),
+    [string]$ConfigRepo = 'C:\Sentinel\config-readonly'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Stage 5 entry point: classify existing or clean sandbox, with no mutation.
+if ($Command -in @('bootstrap-plan','bootstrap-verify')) {
+    # Stage 5 planning uses immutable, public-safe sandbox identity and needs
+    # no local credentials or legacy Stage 1-3 JSON. A supplied config may
+    # supplement future phases, but never overrides the pinned identity.
+    $bootstrapConfig = [pscustomobject]@{
+        lab = 'sentinel-l1-sandbox'
+        mode = 'isolated-sandbox'
+        network = [pscustomobject]@{ switch = 'Sentinel-L1'; type = 'Internal' }
+        paths = [pscustomobject]@{ vmRoot = 'C:\Sentinel\Level1-Sandbox\VMs' }
+        vms = @(
+            [pscustomobject]@{ name = 'sentinel-l1-cp01' },
+            [pscustomobject]@{ name = 'sentinel-l1-w01' }
+        )
+        protection = [pscustomobject]@{ vmNames = @('k8s-cp01','k8s-w01') }
+    }
+    $bootstrapSource = 'pinned-sandbox-contract'
+    if (Test-Path -LiteralPath $ConfigPath -PathType Leaf) {
+        $provided = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+        if ($provided.lab -cne $bootstrapConfig.lab -or
+            $provided.mode -cne $bootstrapConfig.mode -or
+            $provided.network.switch -cne $bootstrapConfig.network.switch -or
+            $provided.network.type -cne $bootstrapConfig.network.type -or
+            $provided.paths.vmRoot -cne $bootstrapConfig.paths.vmRoot -or
+            ((@($provided.vms | ForEach-Object { $_.name }) | Sort-Object) -join ',') -cne
+            ((@($bootstrapConfig.vms | ForEach-Object { $_.name }) | Sort-Object) -join ',')) {
+            throw 'BLOCKED: supplied legacy config disagrees with the pinned Stage 5 sandbox identity'
+        }
+        $bootstrapSource = $ConfigPath
+    }
+    $bootstrapRun = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8)
+    $bootstrapDir = Join-Path (Join-Path $PSScriptRoot 'runs') $bootstrapRun
+    Import-Module (Join-Path $PSScriptRoot 'src\Sentinel.Bootstrap.psm1') -Force
+    if ($Command -eq 'bootstrap-verify') {
+        $stage4 = Join-Path $PSScriptRoot '..\ansible\Invoke-SentinelReadiness.ps1'
+        $verified = Invoke-SentinelBootstrapVerify -Config $bootstrapConfig -RunDirectory $bootstrapDir -Stage4Script $stage4 -ConfigRepo $ConfigRepo
+        Write-Host "Sentinel Level 1 Stage 5 existing verification: $($verified.Result)"
+        Write-Host "Reason: $($verified.Reason)"
+        Write-Host "Report: $($verified.ReportPath)"
+        if ($verified.Result -ne 'VERIFIED') { exit 2 }
+        exit 0
+    }
+    $bootstrapResult = Invoke-SentinelBootstrapPlan -Config $bootstrapConfig -RunDirectory $bootstrapDir -ConfigPath $bootstrapSource
+    Write-Host "Sentinel Level 1 Stage 5 bootstrap plan: $($bootstrapResult.Result)"
+    Write-Host "Route: $($bootstrapResult.Route)"
+    Write-Host "Reason: $($bootstrapResult.Reason)"
+    Write-Host "Report: $($bootstrapResult.ReportPath)"
+    Write-Host "No Hyper-V or guest configuration was modified."
+    if ($bootstrapResult.Result -eq 'BLOCKED') { exit 2 }
+    exit 0
+}
 # SENTINEL_STAGE2_DISPATCH_V1
 if ($Command -in @('image-discover', 'prepare-images', 'verify-image')) {
     if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { throw "Configuration missing: $ConfigPath" }
@@ -69,6 +121,8 @@ if ($Command -eq 'runs') {
             $report = Join-Path $_.FullName 'preflight.json'
             if (-not (Test-Path -LiteralPath $report)) { $report = Join-Path $_.FullName 'image.json' }
             if (-not (Test-Path -LiteralPath $report)) { $report = Join-Path $_.FullName 'infra.json' }
+            if (-not (Test-Path -LiteralPath $report)) { $report = Join-Path $_.FullName 'bootstrap-plan.json' }
+            if (-not (Test-Path -LiteralPath $report)) { $report = Join-Path $_.FullName 'bootstrap-verify.json' }
             if (Test-Path -LiteralPath $report) {
                 $entry = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
                 [pscustomobject]@{ RunId = $entry.runId; Result = $entry.result; DurationSeconds = $entry.durationSeconds; Report = $report }

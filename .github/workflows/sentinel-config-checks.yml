@@ -33,6 +33,32 @@ jobs:
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/20-containerd-baseline.yml
       - name: Validate Stage 4.2 sandbox reboot persistence playbook syntax
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/30-reboot-persistence.yml
+      - name: Validate Stage 4.3.1 read-only Kubernetes discovery playbook syntax
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/40-kubernetes-discovery.yml
+      - name: Validate read-only Stage 4.3.2 source plan playbook syntax
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/50-kubernetes-package-source-plan.yml
+      - name: Validate Stage 4.3.2 approval gated signed APT source playbook syntax
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/60-kubernetes-repository.yml
+      - name: Validate Stage 4.3.2 installation plan syntax
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/70-kubernetes-install-plan.yml
+      - name: Validate Stage 4.3.2 approval-gated install syntax
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/80-kubernetes-package-install.yml
+      - name: Validate Stage 4.3.3 guarded control-plane initialization syntax
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/90-kubeadm-control-plane.yml
+      - name: Validate Stage 4.3.4 read-only Flannel plan syntax
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/100-flannel-release-plan.yml
+      - name: Validate Stage 4.3.4 approval-gated Flannel apply syntax
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/110-flannel-release-apply.yml
+      - name: Validate desired-state reconciliation syntax
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/120-reconcile-flannel.yml
+      - name: Validate Stage 4.3.5 worker reconciliation playbook syntax
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/130-reconcile-worker.yml
+      - name: Validate Stage 4.4 read-only cluster acceptance playbook
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/140-cluster-validate.yml
+      - name: Validate Stage 4.4.1 approved active networking playbook
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/150-active-network.yml
+      - name: Compile Python management runner
+        run: python -m py_compile infrastructure/ansible/run_readiness.py infrastructure/ansible/reconcile.py
       - name: Execute Level 1 static package tests
         run: python -m unittest discover -s infrastructure/level1/tests -p 'test_*.py' -v
       - name: Demonstrate read-only sample plan
@@ -55,6 +81,15 @@ jobs:
       - name: Exercise Stage 4.2 mode and approval gates (without any VM connections)
         shell: powershell
         run: .\\infrastructure\\ansible\\tests\\Test-ModeApprovalGate.ps1
+      - name: Verify native stderr warning logging and true process failure detection
+        shell: powershell
+        run: .\infrastructure\ansible\tests\Test-NativeStderrCapture.ps1
+      - name: Test Stage 5 bootstrap route classification without Hyper-V
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-BootstrapPlan.ps1
+      - name: Verify Stage 5.2 read-only existing-environment orchestration contract
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-BootstrapVerify.ps1
       - name: Parse all Level 1 PowerShell modules and verify isolation checks
         shell: powershell
         run: .\infrastructure\level1\tests\Test-StaticSafety.ps1

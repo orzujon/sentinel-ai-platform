@@ -33,12 +33,40 @@ Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments
     PlanBaseline = $true
 }
 Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    DiscoverKubernetes = $true
+}
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    PlanKubernetesPackages = $true
+}
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    ConfigureKubernetesRepo = $true
+    RepositoryApprovalToken = "CONFIGURE_SENTINEL_STAGE432_K8S_REPO"
+}
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
     ApplyBaseline = $true
     ApprovalToken = "APPLY_SENTINEL_STAGE42_TO_SANDBOX"
 }
-Assert-BlockedWith -Contains "choose plan, apply or reboot validation" -Arguments @{
+Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Arguments @{
     PlanBaseline = $true
     RebootValidate = $true
+}
+Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Arguments @{
+    ApplyBaseline = $true
+    DiscoverKubernetes = $true
+}
+Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Arguments @{
+    DiscoverKubernetes = $true
+    PlanKubernetesPackages = $true
+}
+Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Arguments @{
+    ConfigureKubernetesRepo = $true
+    PlanKubernetesPackages = $true
+}
+Assert-BlockedWith -Contains "separate Stage 4.3.2 repository approval is missing" -Arguments @{
+    ConfigureKubernetesRepo = $true
+}
+Assert-BlockedWith -Contains "repository approval token only applies to" -Arguments @{
+    RepositoryApprovalToken = "CONFIGURE_SENTINEL_STAGE432_K8S_REPO"
 }
 Assert-BlockedWith -Contains "explicit sandbox reboot approval is missing" -Arguments @{
     RebootValidate = $true
@@ -47,4 +75,73 @@ Assert-BlockedWith -Contains "explicit sandbox apply approval is missing" -Argum
     ApplyBaseline = $true
 }
 
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    PlanKubernetesInstall = $true
+}
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    InstallKubernetesPackages = $true
+    InstallApprovalToken = "INSTALL_SENTINEL_STAGE432_K8S_1372"
+}
+Assert-BlockedWith -Contains "separate Kubernetes package installation approval missing" -Arguments @{
+    InstallKubernetesPackages = $true
+}
+Assert-BlockedWith -Contains "installation token only valid" -Arguments @{
+    InstallApprovalToken = "INSTALL_SENTINEL_STAGE432_K8S_1372"
+}
+Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Arguments @{
+    PlanKubernetesInstall = $true
+    InstallKubernetesPackages = $true
+}
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    PlanControlPlane = $true
+}
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    InitControlPlane = $true
+    ControlPlaneApprovalToken = "INITIALIZE_SENTINEL_STAGE433_CONTROL_PLANE"
+}
+Assert-BlockedWith -Contains "separate Stage 4.3.3 initialization approval missing" -Arguments @{
+    InitControlPlane = $true
+}
+Assert-BlockedWith -Contains "initialization token only valid" -Arguments @{
+    ControlPlaneApprovalToken = "INITIALIZE_SENTINEL_STAGE433_CONTROL_PLANE"
+}
+Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Arguments @{
+    PlanControlPlane = $true
+    InitControlPlane = $true
+}
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    PlanFlannel = $true
+}
+Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Arguments @{
+    PlanFlannel = $true
+    PlanControlPlane = $true
+}
+Assert-BlockedWith -Contains "separate Flannel deployment approval is missing" -Arguments @{
+    ApplyFlannel = $true
+}
+Assert-BlockedWith -Contains "exact reviewed Flannel SHA256 is required" -Arguments @{
+    ApplyFlannel = $true
+    FlannelApprovalToken = "APPLY_SENTINEL_STAGE434_FLANNEL_02810"
+}
+Assert-BlockedWith -Contains "Flannel approval and checksum only valid" -Arguments @{
+    FlannelSha256 = ("a" * 64)
+}
+Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Arguments @{
+    PlanFlannel = $true
+    ApplyFlannel = $true
+}
+Assert-BlockedWith -Contains "invalid Level 1 deployment approval" -Arguments @{
+    Reconcile = $true
+    ReconcileApprovalToken = "BAD_APPROVAL"
+}
+Assert-BlockedWith -Contains "deployment approval only valid" -Arguments @{
+    ReconcileApprovalToken = "DEPLOY_SENTINEL_LEVEL1_LAB"
+}
+Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Arguments @{
+    Reconcile = $true
+    PlanFlannel = $true
+}
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    Reconcile = $true
+}
 Write-Host "PASS: Stage 4.2 mode and approval preflight smoke tests"

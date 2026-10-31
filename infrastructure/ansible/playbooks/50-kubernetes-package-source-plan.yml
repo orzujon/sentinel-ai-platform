@@ -1,0 +1,76 @@
+---
+# Stage 4.3.2: repository access discovery only. Do not register APT sources,
+# download keys to disk, refresh package lists or install any packages.
+- name: Plan a trusted Kubernetes APT package source
+  hosts: sentinel_sandbox
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Inspect existing Kubernetes APT source and keyring files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /etc/apt/sources.list.d/kubernetes.list
+        - /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      register: sentinel_k8s_apt_files
+
+    - name: Inspect installed APT HTTPS and signing tooling
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Version}", "{{ item }}"]
+      loop: [ca-certificates, curl, gpg]
+      register: sentinel_repo_tooling
+      changed_when: false
+      failed_when: false
+
+    - name: Inspect existing package holds
+      ansible.builtin.command:
+        argv: [apt-mark, showhold]
+      register: sentinel_package_holds
+      changed_when: false
+
+    - name: Verify TLS access to the official minor-scoped package signing key endpoint
+      ansible.builtin.uri:
+        url: https://pkgs.k8s.io/core:/stable:/v1.37/deb/Release.key
+        method: GET
+        status_code: 200
+        return_content: false
+        validate_certs: true
+        follow_redirects: safe
+        timeout: 20
+      register: sentinel_repo_access
+      changed_when: false
+      no_log: true
+
+    - name: Require private controller report directory
+      ansible.builtin.assert:
+        that:
+          - sentinel_report_root is defined
+          - sentinel_report_root is string
+          - sentinel_report_root.startswith('/home/')
+        fail_msg: "BLOCKED: private WSL report path required"
+
+    - name: Save package source plan evidence on WSL only
+      ansible.builtin.copy:
+        dest: "{{ sentinel_report_root }}/{{ inventory_hostname }}.json"
+        mode: '0600'
+        content: >-
+          {{
+            {
+              'aptSourceExists': sentinel_k8s_apt_files.results[0].stat.exists,
+              'aptKeyringExists': sentinel_k8s_apt_files.results[1].stat.exists,
+              'caCertificatesInstalled': sentinel_repo_tooling.results[0].rc == 0,
+              'curlInstalled': sentinel_repo_tooling.results[1].rc == 0,
+              'gpgInstalled': sentinel_repo_tooling.results[2].rc == 0,
+              'packageHolds': sentinel_package_holds.stdout_lines,
+              'repoTlsReachable': sentinel_repo_access.status == 200
+            } | to_nice_json
+          }}
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Report read-only package repository reachability
+      ansible.builtin.debug:
+        msg: "STAGE432_SOURCE_INSPECTED: TLS endpoint reachable; no guest configuration changes"

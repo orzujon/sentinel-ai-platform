@@ -1,0 +1,139 @@
+---
+# Stage 4.3.3: reuse private inventory IPs; never touch workers during init.
+# Plan mode validates kubeadm config using stdin without writing guest files.
+- name: Validate existing two-node package baseline
+  hosts: sentinel_sandbox
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Verify the target is in the pinned inventory
+      ansible.builtin.assert:
+        that:
+          - groups['sentinel_control_plane'] | length == 1
+          - groups['sentinel_workers'] | length == 1
+          - inventory_hostname in (groups['sentinel_control_plane'] + groups['sentinel_workers'])
+    - name: Confirm exact installed Kubernetes versions
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Version}", "{{ item }}"]
+      loop: [kubeadm, kubelet, kubectl]
+      changed_when: false
+      register: packages
+    - name: Block changed Kubernetes versions
+      ansible.builtin.assert:
+        that:
+          - packages.results | map(attribute='stdout') | list == ['1.37.2-1.1', '1.37.2-1.1', '1.37.2-1.1']
+    - name: Verify containerd is available
+      ansible.builtin.command: systemctl is-active containerd
+      changed_when: false
+      register: runtime
+    - name: Require running container runtime
+      ansible.builtin.assert:
+        that:
+          - runtime.stdout == 'active'
+
+- name: Plan or explicitly initialize the approved control plane
+  hosts: sentinel_control_plane
+  gather_facts: false
+  any_errors_fatal: true
+  become: true
+  vars:
+    sentinel_kubeadm_config: |
+      apiVersion: kubeadm.k8s.io/v1beta4
+      kind: InitConfiguration
+      localAPIEndpoint:
+        advertiseAddress: "{{ ansible_host }}"
+        bindPort: 6443
+      nodeRegistration:
+        name: "{{ inventory_hostname }}"
+        criSocket: unix:///run/containerd/containerd.sock
+        kubeletExtraArgs:
+          - name: node-ip
+            value: "{{ ansible_host }}"
+      ---
+      apiVersion: kubeadm.k8s.io/v1beta4
+      kind: ClusterConfiguration
+      kubernetesVersion: v1.37.2
+      networking:
+        podSubnet: 10.244.0.0/16
+        serviceSubnet: 10.96.0.0/12
+        dnsDomain: cluster.local
+      apiServer:
+        certSANs:
+          - "{{ ansible_host }}"
+  tasks:
+    - name: Ensure approved mode only
+      ansible.builtin.assert:
+        that:
+          - sentinel_kubeadm_mode is defined
+          - sentinel_kubeadm_mode in ['plan', 'apply']
+          - sentinel_kubeadm_mode != 'apply' or (sentinel_cp_init_approved | default(false) | bool)
+    - name: Check for a previous control-plane initialization
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /etc/kubernetes/admin.conf
+        - /etc/kubernetes/manifests/kube-apiserver.yaml
+        - /etc/kubernetes/pki/ca.key
+      register: markers
+    - name: Reject existing or partially initialized control plane
+      ansible.builtin.assert:
+        that:
+          - not (markers.results | map(attribute='stat.exists') | select | list | length > 0)
+        fail_msg: Existing or partially initialized cluster detected; no reset or overwrite permitted
+    - name: Confirm the private IP exists on the control-plane node
+      ansible.builtin.command:
+        argv: [ip, -j, -4, addr, show]
+      changed_when: false
+      register: addresses
+    - name: Assert pinned private IP remains assigned
+      ansible.builtin.assert:
+        that:
+          - "addresses.stdout is search(ansible_host | regex_escape)"
+    - name: Validate Kubernetes init configuration without writing to VM
+      ansible.builtin.command:
+        argv: [kubeadm, config, validate, --config, /dev/stdin]
+        stdin: "{{ sentinel_kubeadm_config }}"
+        stdin_add_newline: true
+      changed_when: false
+    - name: Announce validated plan without exposing bootstrap secrets
+      ansible.builtin.debug:
+        msg: "STAGE433_PLAN_READY: kubeadm v1.37.2 control-plane config validated against pinned private inventory"
+      when: sentinel_kubeadm_mode == 'plan'
+    - name: Ensure kubeadm configuration directory exists for approved apply
+      ansible.builtin.file:
+        path: /etc/kubernetes
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      when: sentinel_kubeadm_mode == 'apply'
+    - name: Write approved root-only kubeadm configuration
+      ansible.builtin.copy:
+        dest: /etc/kubernetes/sentinel-init.yaml
+        owner: root
+        group: root
+        mode: '0600'
+        content: "{{ sentinel_kubeadm_config }}"
+      when: sentinel_kubeadm_mode == 'apply'
+    - name: Initialize control plane once; never publish join token to logs
+      ansible.builtin.command:
+        argv: [kubeadm, init, --config, /etc/kubernetes/sentinel-init.yaml, --skip-token-print]
+        creates: /etc/kubernetes/manifests/kube-apiserver.yaml
+      register: init_result
+      no_log: true
+      when: sentinel_kubeadm_mode == 'apply'
+    - name: Verify generated API manifest
+      ansible.builtin.stat:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+      register: api_manifest
+      when: sentinel_kubeadm_mode == 'apply'
+    - name: Require initialized manifest
+      ansible.builtin.assert:
+        that:
+          - api_manifest.stat.isreg | default(false)
+      when: sentinel_kubeadm_mode == 'apply'
+    - name: Report approved initialization
+      ansible.builtin.debug:
+        msg: "STAGE433_INITIALIZED: control-plane manifests generated; CNI and worker join remain separate stages"
+      when: sentinel_kubeadm_mode == 'apply'

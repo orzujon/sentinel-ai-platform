@@ -1,0 +1,194 @@
+---
+# Stage 4.3.2: configure ONLY the signed Kubernetes v1.37 APT source.
+# Requires the management controller's explicit approval token, verified pinned
+# inventory and both-guest read-only preflight. Never installs Kubernetes.
+- name: Validate repository bootstrap prerequisites on ALL sandbox guests
+  hosts: sentinel_sandbox
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require management controller approval
+      ansible.builtin.assert:
+        that:
+          - sentinel_repo_bootstrap_approved is defined
+          - sentinel_repo_bootstrap_approved is sameas true
+          - sentinel_report_root is defined
+          - sentinel_report_root.startswith('/home/')
+        fail_msg: "BLOCKED: explicit repository approval and private report path required"
+
+    - name: Check for an existing Kubernetes APT source and keyring
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /etc/apt/sources.list.d/kubernetes.list
+        - /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      register: sentinel_existing_k8s_repo
+
+    - name: Require clean repository paths before first bootstrap
+      ansible.builtin.assert:
+        that:
+          - not (sentinel_existing_k8s_repo.results | map(attribute='stat.exists') | select | list)
+        fail_msg: "BLOCKED: existing/partial Kubernetes APT source or keyring needs manual review"
+
+    - name: Search for additional Kubernetes package sources
+      become: true
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -REl
+          - 'pkgs[.]k8s[.]io|apt[.]kubernetes[.]io'
+          - /etc/apt/sources.list.d
+      register: sentinel_extra_k8s_repo
+      changed_when: false
+      failed_when: false
+
+    - name: Reject unknown Kubernetes APT sources and search errors
+      ansible.builtin.assert:
+        that:
+          - sentinel_extra_k8s_repo.rc == 1
+        fail_msg: "BLOCKED: existing Kubernetes repository or unreadable APT source found"
+
+    - name: Inspect whether legacy /etc/apt/sources.list exists
+      ansible.builtin.stat:
+        path: /etc/apt/sources.list
+        follow: false
+      register: sentinel_legacy_sources
+
+    - name: Search legacy sources.list for additional Kubernetes repositories
+      become: true
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -El
+          - 'pkgs[.]k8s[.]io|apt[.]kubernetes[.]io'
+          - /etc/apt/sources.list
+      when: sentinel_legacy_sources.stat.exists
+      register: sentinel_legacy_repo_search
+      changed_when: false
+      failed_when: false
+
+    - name: Block unexpected legacy Kubernetes package sources
+      ansible.builtin.assert:
+        that:
+          - (not sentinel_legacy_sources.stat.exists) or (sentinel_legacy_repo_search.rc | default(2) == 1)
+        fail_msg: "BLOCKED: unknown Kubernetes source or inaccessible legacy APT file"
+
+    - name: Download the HTTPS Release key into Ansible memory only
+      ansible.builtin.uri:
+        url: https://pkgs.k8s.io/core:/stable:/v1.37/deb/Release.key
+        method: GET
+        status_code: 200
+        validate_certs: true
+        return_content: true
+        follow_redirects: safe
+        timeout: 25
+      register: sentinel_release_key
+      changed_when: false
+      no_log: true
+
+    - name: Read signing-key fingerprint without importing it
+      ansible.builtin.command:
+        argv: [gpg, --batch, --with-colons, --import-options, show-only, --import]
+        stdin: "{{ sentinel_release_key.content }}"
+        stdin_add_newline: false
+      register: sentinel_release_key_identity
+      changed_when: false
+      no_log: true
+
+    - name: Require independently reviewed Kubernetes OBS signing fingerprint
+      ansible.builtin.assert:
+        that:
+          - sentinel_release_key_identity.rc == 0
+          - sentinel_release_key_identity.stdout is search('(?m)^fpr:::::::::DE15B14486CD377B9E876E1A234654DA9A296436:')
+        fail_msg: "BLOCKED: Kubernetes APT signing key fingerprint differs from reviewed identity"
+
+    - name: Require installed certificate and GPG tooling before any changes
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Status}", "{{ item }}"]
+      loop: [ca-certificates, gpg, python3-apt]
+      register: sentinel_crypto_packages
+      changed_when: false
+
+    - name: Assert package signature verification prerequisites
+      ansible.builtin.assert:
+        that:
+          - sentinel_crypto_packages.results | map(attribute='stdout') | unique | list == ['install ok installed']
+        fail_msg: "BLOCKED: missing TLS/GPG/python3-apt prerequisites; do not auto-install packages"
+
+- name: Register approved Kubernetes APT source without installing Kubernetes
+  hosts: sentinel_sandbox
+  gather_facts: false
+  any_errors_fatal: true
+  serial: 1
+  become: true
+  tasks:
+    - name: Create dedicated keyring directory if needed
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Write verified Kubernetes public key in binary APT keyring format
+      ansible.builtin.command:
+        argv:
+          - gpg
+          - --batch
+          - --yes
+          - --dearmor
+          - -o
+          - /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        stdin: "{{ sentinel_release_key.content }}"
+        stdin_add_newline: false
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      no_log: true
+
+    - name: Ensure Kubernetes keyring is readable by APT
+      ansible.builtin.file:
+        path: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Register only the version-scoped Kubernetes repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/kubernetes.list
+        owner: root
+        group: root
+        mode: '0644'
+        force: false
+        content: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.37/deb/ /\n"
+
+    - name: Refresh APT package indexes with signature verification enabled
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 0
+
+    - name: Inspect exact signed Kubernetes package candidates
+      ansible.builtin.command:
+        argv: [apt-cache, policy, "{{ item }}"]
+      loop: [kubeadm, kubelet, kubectl]
+      register: sentinel_signed_pkg_policy
+      changed_when: false
+
+    - name: Store APT candidate evidence on the private WSL controller
+      ansible.builtin.copy:
+        dest: "{{ sentinel_report_root }}/{{ inventory_hostname }}.json"
+        mode: '0600'
+        content: >-
+          {{
+            {
+              'kubeadmPolicyRaw': sentinel_signed_pkg_policy.results[0].stdout,
+              'kubeletPolicyRaw': sentinel_signed_pkg_policy.results[1].stdout,
+              'kubectlPolicyRaw': sentinel_signed_pkg_policy.results[2].stdout
+            } | to_nice_json
+          }}
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Report limited approved repository changes
+      ansible.builtin.debug:
+        msg: "STAGE432_REPO_CONFIGURED: keyring, signed-by repository and APT metadata only; Kubernetes packages not installed"

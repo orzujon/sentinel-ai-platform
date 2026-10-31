@@ -1,0 +1,142 @@
+---
+# One-shot reconciliation of the currently supported cluster foundation.
+# The controller fetches exactly one verified artifact and supplies its private path.
+- name: Reconcile Flannel against reviewed desired state
+  hosts: sentinel_control_plane
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    sentinel_kubeconfig: /etc/kubernetes/admin.conf
+    sentinel_flannel_manifest: "{{ lookup('ansible.builtin.file', sentinel_flannel_artifact, rstrip=False) }}"
+  tasks:
+    - name: Require explicit safe reconciliation mode
+      ansible.builtin.assert:
+        that:
+          - sentinel_reconcile_mode in ['plan', 'apply']
+          - sentinel_flannel_version is match('^v[0-9]+[.][0-9]+[.][0-9]+$')
+          - sentinel_flannel_sha256 is match('^[a-f0-9]{64}$')
+          - sentinel_flannel_artifact.startswith('/home/')
+          - sentinel_flannel_manifest | hash('sha256') == sentinel_flannel_sha256
+          - "'10.244.0.0/16' in sentinel_flannel_manifest"
+          - "('ghcr.io/flannel-io/flannel:' ~ sentinel_flannel_version) in sentinel_flannel_manifest"
+        fail_msg: Desired-state artifact or security parameters failed verification
+      no_log: true
+    - name: Confirm Kubernetes API readiness
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", get, --raw=/readyz]
+      changed_when: false
+      register: api
+    - name: Reject unhealthy control plane
+      ansible.builtin.assert:
+        that:
+          - api.stdout | trim == 'ok'
+    - name: Inspect installed Flannel DaemonSet
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, kube-flannel, get, ds, kube-flannel-ds, --ignore-not-found, -o, json]
+      changed_when: false
+      register: ds
+    - name: Inspect existing Sentinel release marker
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", get, namespace, kube-flannel, --ignore-not-found, -o, json]
+      changed_when: false
+      register: marker
+    - name: Determine whether release is already managed
+      ansible.builtin.set_fact:
+        # kubectl --ignore-not-found -o json can return {} on missing resources.
+        # Only a typed DaemonSet counts as existing; non-empty stdout does not.
+        sentinel_ds_object: "{{ (ds.stdout | default('{}', true) | from_json) }}"
+        sentinel_namespace_object: "{{ (marker.stdout | default('{}', true) | from_json) }}"
+    - name: Require Kubernetes discovery responses to have expected resource kinds
+      ansible.builtin.assert:
+        that:
+          - sentinel_ds_object == {} or (sentinel_ds_object.kind | default('')) == 'DaemonSet'
+          - sentinel_namespace_object == {} or (sentinel_namespace_object.kind | default('')) == 'Namespace'
+        fail_msg: Unexpected Kubernetes resource discovery response; refusing to reconcile
+    - name: Determine current release from parsed Kubernetes objects
+      ansible.builtin.set_fact:
+        sentinel_existing_ds: "{{ (sentinel_ds_object.kind | default('')) == 'DaemonSet' }}"
+        sentinel_release_matches: "{{ sentinel_namespace_object.get('metadata', {}).get('annotations', {}).get('sentinel.ai/manifest-sha256') == sentinel_flannel_sha256 }}"
+    - name: Inspect existing DaemonSet image versions without modifying workloads
+      ansible.builtin.debug:
+        msg:
+          - "FLANNEL_EXISTING: daemonset={{ sentinel_existing_ds }} marker_matches={{ sentinel_release_matches }}"
+          - "FLANNEL_IMAGES: {{ sentinel_ds_object.get('spec', {}).get('template', {}).get('spec', {}).get('containers', []) | map(attribute='image') | list if sentinel_existing_ds else [] }}"
+          - "FLANNEL_INIT_IMAGES: {{ sentinel_ds_object.get('spec', {}).get('template', {}).get('spec', {}).get('initContainers', []) | map(attribute='image') | list if sentinel_existing_ds else [] }}"
+      when: sentinel_existing_ds
+    - name: Compare unmanaged existing Flannel to exact locked manifest with kubectl diff
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", diff, -f, /dev/stdin]
+        stdin: "{{ sentinel_flannel_manifest }}"
+        stdin_add_newline: false
+      register: sentinel_diff
+      changed_when: false
+      failed_when: sentinel_diff.rc not in [0, 1]
+      when:
+        - sentinel_existing_ds
+        - not sentinel_release_matches
+    - name: Explain unmanaged release drift without leaking entire manifest
+      ansible.builtin.debug:
+        msg: "FLANNEL_DRIFT: existing release is not declared as managed and kubectl reports changes. Review actual release before any adoption or upgrade."
+      when:
+        - sentinel_existing_ds
+        - not sentinel_release_matches
+        - sentinel_diff.rc == 1
+    - name: Refuse to overwrite a different or unverified existing Flannel deployment
+      ansible.builtin.assert:
+        that:
+          - not sentinel_existing_ds or sentinel_release_matches or (sentinel_diff is defined and sentinel_diff.rc | default(2) == 0)
+        fail_msg: "Existing Flannel differs from desired manifest. No modifications made; use a reviewed upgrade or repair process."
+    - name: Record whether an identical unmanaged deployment can be safely adopted
+      ansible.builtin.set_fact:
+        sentinel_adopt_identical: "{{ sentinel_existing_ds and not sentinel_release_matches and sentinel_diff is defined and (sentinel_diff.rc | default(2) == 0) }}"
+
+    - name: Display deterministic change plan
+      ansible.builtin.debug:
+        msg: "RECONCILE_PLAN: release={{ sentinel_flannel_version }} action={{ 'adopt-identical' if sentinel_adopt_identical else ('verify' if sentinel_existing_ds else 'install') }} artifact={{ sentinel_flannel_sha256 }} mode={{ sentinel_reconcile_mode }}"
+    - name: Require explicit mutation approval before installing
+      ansible.builtin.assert:
+        that:
+          - sentinel_reconcile_mode != 'apply' or (sentinel_reconcile_approved | default(false) | bool)
+    - name: Apply exact cached manifest only when absent and approved
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", apply, -f, /dev/stdin]
+        stdin: "{{ sentinel_flannel_manifest }}"
+        stdin_add_newline: false
+      no_log: true
+      when:
+        - sentinel_reconcile_mode == 'apply'
+        - not sentinel_existing_ds
+    - name: Wait for Flannel rollout after approved installation or on existing managed release
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, kube-flannel, rollout, status, ds/kube-flannel-ds, --timeout=180s]
+      changed_when: false
+      when: sentinel_existing_ds or sentinel_reconcile_mode == 'apply'
+    - name: Annotate verified release after successful rollout
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ sentinel_kubeconfig }}"
+          - annotate
+          - namespace
+          - kube-flannel
+          - "--overwrite"
+          - "sentinel.ai/manifest-sha256={{ sentinel_flannel_sha256 }}"
+          - "sentinel.ai/flannel-version={{ sentinel_flannel_version }}"
+      when:
+        - sentinel_reconcile_mode == 'apply'
+        - not sentinel_existing_ds or sentinel_adopt_identical
+    - name: Verify Ready node after deployment or matching release
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", get, node, "{{ inventory_hostname }}", -o, "jsonpath={.status.conditions[?(@.type=='Ready')].status}"]
+      register: ready
+      changed_when: false
+      when: sentinel_existing_ds or sentinel_reconcile_mode == 'apply'
+    - name: Require control plane Ready when release exists
+      ansible.builtin.assert:
+        that:
+          - ready.stdout == 'True'
+      when: sentinel_existing_ds or sentinel_reconcile_mode == 'apply'
+    - name: Report desired-state reconciliation
+      ansible.builtin.debug:
+        msg: "RECONCILE_COMPLETE: mode={{ sentinel_reconcile_mode }} release={{ sentinel_flannel_version }} status={{ 'validated' if sentinel_reconcile_mode == 'plan' else 'ready' }}"

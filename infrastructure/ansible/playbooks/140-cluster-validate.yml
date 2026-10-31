@@ -1,0 +1,130 @@
+---
+# Stage 4.4 — observe only; never create/delete workloads or change nodes.
+- name: Validate both Kubernetes nodes and networking baseline
+  hosts: sentinel_control_plane
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    sentinel_kubeconfig: /etc/kubernetes/admin.conf
+    sentinel_expected_cp: "{{ groups['sentinel_control_plane'][0] }}"
+    sentinel_expected_worker: "{{ groups['sentinel_workers'][0] }}"
+  tasks:
+    - name: Require exactly the pinned two-node topology
+      ansible.builtin.assert:
+        that:
+          - groups['sentinel_control_plane'] | length == 1
+          - groups['sentinel_workers'] | length == 1
+          - sentinel_expected_cp != sentinel_expected_worker
+
+    - name: Require API server ready
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", get, --raw=/readyz]
+      changed_when: false
+      register: sentinel_api
+
+    - name: Read Kubernetes node objects
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", get, nodes, -o, json]
+      changed_when: false
+      register: sentinel_nodes_raw
+
+    - name: Read CoreDNS deployment
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, kube-system, get, deployment, coredns, -o, json]
+      changed_when: false
+      register: sentinel_coredns_raw
+
+    - name: Read cluster DNS service
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, kube-system, get, service, kube-dns, -o, json]
+      changed_when: false
+      register: sentinel_dns_service_raw
+
+    - name: Read CoreDNS endpoints
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, kube-system, get, endpointslices, -l, kubernetes.io/service-name=kube-dns, -o, json]
+      changed_when: false
+      register: sentinel_dns_endpoints_raw
+
+    - name: Read Flannel DaemonSet
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, kube-flannel, get, daemonset, kube-flannel-ds, -o, json]
+      changed_when: false
+      register: sentinel_flannel_ds_raw
+
+    - name: Read Flannel pods
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, kube-flannel, get, pods, -l, app=flannel, -o, json]
+      changed_when: false
+      register: sentinel_flannel_pods_raw
+
+    - name: Read all system Pod statuses
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, kube-system, get, pods, -o, json]
+      changed_when: false
+      register: sentinel_system_pods_raw
+
+    - name: Parse Kubernetes evidence in memory
+      ansible.builtin.set_fact:
+        sentinel_node_list: "{{ (sentinel_nodes_raw.stdout | from_json)['items'] }}"
+        sentinel_coredns: "{{ sentinel_coredns_raw.stdout | from_json }}"
+        sentinel_dns_service: "{{ sentinel_dns_service_raw.stdout | from_json }}"
+        sentinel_dns_endpoints: "{{ (sentinel_dns_endpoints_raw.stdout | from_json)['items'] }}"
+        sentinel_flannel_ds: "{{ sentinel_flannel_ds_raw.stdout | from_json }}"
+        sentinel_flannel_pods: "{{ (sentinel_flannel_pods_raw.stdout | from_json)['items'] }}"
+        sentinel_system_pods: "{{ (sentinel_system_pods_raw.stdout | from_json)['items'] }}"
+
+    - name: Build name-indexed node state
+      ansible.builtin.set_fact:
+        sentinel_nodes_by_name: "{{ dict(sentinel_node_list | map(attribute='metadata.name') | zip(sentinel_node_list)) }}"
+
+    - name: Require exactly two expected Ready nodes with pinned versions and private IPs
+      ansible.builtin.assert:
+        that:
+          - sentinel_api.stdout | trim == 'ok'
+          - sentinel_nodes_by_name | length == 2
+          - (sentinel_nodes_by_name.keys() | list | sort) == ([sentinel_expected_cp, sentinel_expected_worker] | sort)
+          - sentinel_nodes_by_name[sentinel_expected_cp].status.nodeInfo.kubeletVersion == 'v1.37.2'
+          - sentinel_nodes_by_name[sentinel_expected_worker].status.nodeInfo.kubeletVersion == 'v1.37.2'
+          - "'True' in (sentinel_nodes_by_name[sentinel_expected_cp].status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | list)"
+          - "'True' in (sentinel_nodes_by_name[sentinel_expected_worker].status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | list)"
+          - "hostvars[sentinel_expected_cp].ansible_host in (sentinel_nodes_by_name[sentinel_expected_cp].status.addresses | selectattr('type', 'equalto', 'InternalIP') | map(attribute='address') | list)"
+          - "hostvars[sentinel_expected_worker].ansible_host in (sentinel_nodes_by_name[sentinel_expected_worker].status.addresses | selectattr('type', 'equalto', 'InternalIP') | map(attribute='address') | list)"
+        fail_msg: Node count, identity, Ready, version or InternalIP differs from pinned inventory
+
+    - name: Require healthy CoreDNS deployment and ready endpoint
+      ansible.builtin.assert:
+        that:
+          - sentinel_coredns.status.availableReplicas | default(0) | int >= 1
+          - sentinel_coredns.status.readyReplicas | default(0) | int >= 1
+          - sentinel_dns_service.spec.clusterIP != 'None'
+          - sentinel_dns_endpoints | length >= 1
+          - "(sentinel_dns_endpoints | map(attribute='endpoints') | flatten | selectattr('conditions.ready', 'equalto', true) | list | length) >= 1"
+        fail_msg: CoreDNS control-plane health or service endpoints unavailable; DNS lookup not yet tested
+
+    - name: Require Flannel DaemonSet scheduled and Ready on both nodes
+      ansible.builtin.assert:
+        that:
+          - sentinel_flannel_ds.status.desiredNumberScheduled | int == 2
+          - sentinel_flannel_ds.status.numberReady | int == 2
+          - sentinel_flannel_ds.status.updatedNumberScheduled | int == 2
+          - "sentinel_flannel_pods | selectattr('status.phase', 'equalto', 'Running') | list | length == 2"
+          - "(sentinel_flannel_pods | map(attribute='spec.nodeName') | list | sort) == ([sentinel_expected_cp, sentinel_expected_worker] | sort)"
+        fail_msg: Flannel coverage or Pod health differs from expected two-node topology
+
+    - name: Require all kube-system Pods Running or Succeeded
+      ansible.builtin.assert:
+        that:
+          - "sentinel_system_pods | rejectattr('status.phase', 'in', ['Running', 'Succeeded']) | list | length == 0"
+          - "sentinel_system_pods | length >= 4"
+        fail_msg: Unexpected kube-system Pod phase detected
+
+    - name: Report Stage 4.4 evidence without claiming active traffic tests
+      ansible.builtin.debug:
+        msg:
+          - "STAGE44_BASELINE_PASS: API ready; 2/2 expected nodes Ready; private IPs and kubelet version match"
+          - "STAGE44_CNI_PASS: Flannel 2/2 scheduled and Ready"
+          - "STAGE44_DNS_COMPONENTS_PASS: CoreDNS deployment and ready endpoints found"
+          - "STAGE44_TRAFFIC_TEST: NOT_RUN (active cross-node Pod traffic remains a separate acceptance criterion)"
+          - "STAGE44_RECOVERY_TEST: NOT_RUN (non-destructive re-run and failure injection remain separate acceptance criteria)"

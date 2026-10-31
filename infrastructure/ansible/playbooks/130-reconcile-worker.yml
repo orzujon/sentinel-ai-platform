@@ -1,0 +1,198 @@
+---
+# Level 1 / Stage 4.3.5. Joined worker is reconciled without repeating kubeadm join.
+# Short-lived bootstrap token exists only in memory (Ansible no_log) and expires in 10m.
+- name: Assess worker package and local join state
+  hosts: sentinel_workers
+  gather_facts: false
+  any_errors_fatal: true
+  become: true
+  tasks:
+    - name: Require one control plane and one worker from the pinned private inventory
+      ansible.builtin.assert:
+        that:
+          - groups['sentinel_control_plane'] | length == 1
+          - groups['sentinel_workers'] | length == 1
+          - sentinel_reconcile_mode in ['plan', 'apply']
+    - name: Inspect kubelet client configuration (read-only)
+      ansible.builtin.stat:
+        path: /etc/kubernetes/kubelet.conf
+        follow: false
+      register: worker_kubelet
+    - name: Inspect worker control-plane manifests (read-only)
+      ansible.builtin.stat:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+        follow: false
+      register: worker_api
+    - name: Block workers carrying control-plane components
+      ansible.builtin.assert:
+        that:
+          - not worker_api.stat.exists
+    - name: Require installed kubeadm version
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Version}", kubeadm]
+      changed_when: false
+      register: package
+    - name: Require matching worker Kubernetes installation
+      ansible.builtin.assert:
+        that:
+          - package.stdout == '1.37.2-1.1'
+    - name: Require available container runtime
+      ansible.builtin.command:
+        argv: [systemctl, is-active, containerd]
+      changed_when: false
+      register: runtime
+    - name: Reject unavailable worker CRI
+      ansible.builtin.assert:
+        that:
+          - runtime.stdout == 'active'
+    - name: Record local join marker
+      ansible.builtin.set_fact:
+        sentinel_worker_local_joined: "{{ worker_kubelet.stat.isreg | default(false) }}"
+
+- name: Check control-plane records and issue bootstrap token only when needed
+  hosts: sentinel_control_plane
+  gather_facts: false
+  any_errors_fatal: true
+  become: true
+  vars:
+    sentinel_worker_name: "{{ groups['sentinel_workers'][0] }}"
+  tasks:
+    - name: Require ready control plane before joining worker
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, node, "{{ inventory_hostname }}", -o, "jsonpath={.status.conditions[?(@.type=='Ready')].status}"]
+      changed_when: false
+      register: cp_ready
+    - name: Require control plane Ready
+      ansible.builtin.assert:
+        that:
+          - cp_ready.stdout == 'True'
+    - name: Query Kubernetes for existing worker registration
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, node, "{{ sentinel_worker_name }}", --ignore-not-found, -o, json]
+      changed_when: false
+      register: node_query
+    - name: Interpret cluster worker registration
+      ansible.builtin.set_fact:
+        sentinel_worker_node: "{{ node_query.stdout | default('{}', true) | from_json }}"
+    - name: Require consistent local and control-plane worker state
+      ansible.builtin.assert:
+        that:
+          - sentinel_worker_node == {} or (sentinel_worker_node.kind | default('')) == 'Node'
+          - (sentinel_worker_node.kind | default('')) == 'Node' or not hostvars[sentinel_worker_name].sentinel_worker_local_joined | bool
+          - (sentinel_worker_node.kind | default('')) != 'Node' or hostvars[sentinel_worker_name].sentinel_worker_local_joined | bool
+        fail_msg: Worker is partially joined or its registration differs; no reset or unsafe rejoin
+    - name: Set worker join intent
+      ansible.builtin.set_fact:
+        sentinel_worker_join_required: "{{ (sentinel_worker_node.kind | default('')) != 'Node' }}"
+    - name: Record stage 4.3.5 join decision
+      ansible.builtin.debug:
+        msg: "STAGE435_PLAN: worker={{ sentinel_worker_name }} action={{ 'join' if sentinel_worker_join_required else 'verify' }} mode={{ sentinel_reconcile_mode }}"
+    - name: Require approved reconciliation before creating join credentials
+      ansible.builtin.assert:
+        that:
+          - sentinel_reconcile_mode != 'apply' or (sentinel_reconcile_approved | default(false) | bool)
+    - name: Create 10-minute bootstrap credential on control plane
+      ansible.builtin.command:
+        argv: [kubeadm, token, create, --ttl, 10m, --print-join-command]
+      register: sentinel_join_command
+      changed_when: true
+      no_log: true
+      when:
+        - sentinel_reconcile_mode == 'apply'
+        - sentinel_worker_join_required | bool
+    - name: Parse endpoint, short-lived token and CA hash only into private Ansible facts
+      ansible.builtin.set_fact:
+        sentinel_join_endpoint: "{{ sentinel_join_command.stdout.split()[2] }}"
+        sentinel_join_token: "{{ sentinel_join_command.stdout | regex_search('--token ([a-z0-9]{6}[.][a-z0-9]{16})', '\\1') | first }}"
+        sentinel_join_ca_hash: "{{ sentinel_join_command.stdout | regex_search('sha256:[a-f0-9]{64}') }}"
+      no_log: true
+      when:
+        - sentinel_reconcile_mode == 'apply'
+        - sentinel_worker_join_required | bool
+    - name: Require bootstrap material matches approved control-plane endpoint
+      ansible.builtin.assert:
+        that:
+          - sentinel_join_endpoint == ansible_host ~ ':6443'
+          - sentinel_join_token is match('^[a-z0-9]{6}[.][a-z0-9]{16}$')
+          - sentinel_join_ca_hash is match('^sha256:[0-9a-f]{64}$')
+      no_log: true
+      when:
+        - sentinel_reconcile_mode == 'apply'
+        - sentinel_worker_join_required | bool
+
+- name: Join the worker using kubeadm v1beta4 input held in memory only
+  hosts: sentinel_workers
+  gather_facts: false
+  any_errors_fatal: true
+  become: true
+  vars:
+    sentinel_cp_name: "{{ groups['sentinel_control_plane'][0] }}"
+  tasks:
+    - name: Confirm worker private IP is still assigned
+      ansible.builtin.command:
+        argv: [ip, -j, -4, addr, show]
+      register: interfaces
+      changed_when: false
+    - name: Require expected private worker IP
+      ansible.builtin.assert:
+        that:
+          - ansible_host in (interfaces.stdout | from_json | map(attribute='addr_info') | flatten | selectattr('family', 'equalto', 'inet') | map(attribute='local') | list)
+    - name: Perform approved join without exposing token or writing a join file
+      ansible.builtin.command:
+        argv: [kubeadm, join, --config, /dev/stdin]
+        stdin: |
+          apiVersion: kubeadm.k8s.io/v1beta4
+          kind: JoinConfiguration
+          discovery:
+            bootstrapToken:
+              token: "{{ hostvars[sentinel_cp_name].sentinel_join_token }}"
+              apiServerEndpoint: "{{ hostvars[sentinel_cp_name].sentinel_join_endpoint }}"
+              caCertHashes:
+                - "{{ hostvars[sentinel_cp_name].sentinel_join_ca_hash }}"
+          nodeRegistration:
+            name: "{{ inventory_hostname }}"
+            criSocket: unix:///run/containerd/containerd.sock
+            kubeletExtraArgs:
+              - name: node-ip
+                value: "{{ ansible_host }}"
+        stdin_add_newline: true
+      no_log: true
+      when:
+        - sentinel_reconcile_mode == 'apply'
+        - hostvars[sentinel_cp_name].sentinel_worker_join_required | bool
+
+- name: Verify worker membership from the established control plane
+  hosts: sentinel_control_plane
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    sentinel_worker_name: "{{ groups['sentinel_workers'][0] }}"
+  tasks:
+    - name: Wait for worker to register and become Ready when applying
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, node, "{{ sentinel_worker_name }}", -o, "jsonpath={.status.conditions[?(@.type=='Ready')].status}"]
+      register: worker_ready
+      changed_when: false
+      until: worker_ready.rc == 0 and worker_ready.stdout == 'True'
+      retries: 30
+      delay: 6
+      when: sentinel_reconcile_mode == 'apply'
+    - name: Inspect registered worker address after reconciliation
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, node, "{{ sentinel_worker_name }}", -o, json]
+      register: worker_record
+      changed_when: false
+      when: sentinel_reconcile_mode == 'apply'
+    - name: Ensure worker reports its configured private IP
+      ansible.builtin.assert:
+        that:
+          - "hostvars[sentinel_worker_name].ansible_host in ((worker_record.stdout | from_json).status.addresses | selectattr('type', 'equalto', 'InternalIP') | map(attribute='address') | list)"
+      when: sentinel_reconcile_mode == 'apply'
+    - name: Confirm control plane and worker node identities are separate
+      ansible.builtin.assert:
+        that:
+          - sentinel_worker_name != inventory_hostname
+    - name: Report Stage 4.3.5 state
+      ansible.builtin.debug:
+        msg: "STAGE435_{{ 'WORKER_READY' if sentinel_reconcile_mode == 'apply' else 'PLAN_READY' }}: worker={{ sentinel_worker_name }} join={{ 'needed' if sentinel_worker_join_required else 'already-present' }} mode={{ sentinel_reconcile_mode }}"

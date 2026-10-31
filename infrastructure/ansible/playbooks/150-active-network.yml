@@ -1,0 +1,266 @@
+---
+# Stage 4.4.1: only approved apply runs create temporary, run-scoped diagnostics.
+# The entire namespace is unique and guarded by an exact owner marker before deletion.
+- name: Exercise real DNS and cross-node Pod networking with owned diagnostics
+  hosts: sentinel_control_plane
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    sentinel_kubeconfig: /etc/kubernetes/admin.conf
+    sentinel_cp: "{{ groups['sentinel_control_plane'][0] }}"
+    sentinel_worker: "{{ groups['sentinel_workers'][0] }}"
+    sentinel_kubectl: "kubectl --kubeconfig=/etc/kubernetes/admin.conf"
+  tasks:
+    - name: Require reviewed and isolated test configuration
+      ansible.builtin.assert:
+        that:
+          - sentinel_reconcile_mode in ['plan', 'apply']
+          - sentinel_network_test_enabled | type_debug == 'bool'
+          - sentinel_netcheck_namespace is match('^sentinel-netcheck-[a-f0-9]{12}$')
+          - sentinel_cp != sentinel_worker
+          - groups['sentinel_control_plane'] | length == 1
+          - groups['sentinel_workers'] | length == 1
+          - sentinel_netcheck_image == 'busybox:1.37.0'
+    - name: Report active probe intent without modifying the cluster
+      ansible.builtin.debug:
+        msg: "STAGE441_PLAN: mode={{ sentinel_reconcile_mode }} enabled={{ sentinel_network_test_enabled }} pods=2 nodes={{ sentinel_cp }},{{ sentinel_worker }} scope={{ sentinel_netcheck_namespace }} image={{ sentinel_netcheck_image }}"
+    - name: Require explicit lab approval for active diagnostic Pods
+      ansible.builtin.assert:
+        that:
+          - sentinel_reconcile_mode != 'apply' or (sentinel_reconcile_approved | default(false) | bool)
+    - name: Run temporary cross-node probes with guaranteed guarded cleanup
+      when:
+        - sentinel_reconcile_mode == 'apply'
+        - sentinel_network_test_enabled | bool
+      block:
+        - name: Create unique owned diagnostic namespace without altering existing namespaces
+          ansible.builtin.command:
+            argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", create, -f, /dev/stdin]
+            stdin: |
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: {{ sentinel_netcheck_namespace }}
+                labels:
+                  app.kubernetes.io/managed-by: sentinel-stage44
+                  sentinel.ai/run-id: {{ sentinel_netcheck_namespace }}
+            stdin_add_newline: true
+          register: sentinel_ns_create
+        - name: Record successful namespace ownership
+          ansible.builtin.set_fact:
+            sentinel_netcheck_created: true
+        - name: Create precisely two pinned-node diagnostic Pods and one test Service
+          ansible.builtin.command:
+            argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, "{{ sentinel_netcheck_namespace }}", create, -f, /dev/stdin]
+            stdin: |
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: probe-cp
+                namespace: {{ sentinel_netcheck_namespace }}
+                labels:
+                  app: sentinel-probe
+                  role: cp
+              spec:
+                nodeName: {{ sentinel_cp }}
+                restartPolicy: Never
+                terminationGracePeriodSeconds: 0
+                tolerations:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: Exists
+                    effect: NoSchedule
+                securityContext:
+                  runAsNonRoot: true
+                  runAsUser: 10001
+                  runAsGroup: 10001
+                  fsGroup: 10001
+                  seccompProfile:
+                    type: RuntimeDefault
+                containers:
+                  - name: probe
+                    image: {{ sentinel_netcheck_image }}
+                    imagePullPolicy: IfNotPresent
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - "printf '%s' '{{ sentinel_netcheck_namespace }}-cp' > /www/index.html; exec httpd -f -p 8080 -h /www"
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      capabilities:
+                        drop: ["ALL"]
+                      readOnlyRootFilesystem: true
+                    resources:
+                      requests:
+                        cpu: 10m
+                        memory: 16Mi
+                      limits:
+                        cpu: 100m
+                        memory: 64Mi
+                    volumeMounts:
+                      - name: www
+                        mountPath: /www
+                volumes:
+                  - name: www
+                    emptyDir:
+                      sizeLimit: 1Mi
+              ---
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: probe-worker
+                namespace: {{ sentinel_netcheck_namespace }}
+                labels:
+                  app: sentinel-probe
+                  role: worker
+              spec:
+                nodeName: {{ sentinel_worker }}
+                restartPolicy: Never
+                terminationGracePeriodSeconds: 0
+                securityContext:
+                  runAsNonRoot: true
+                  runAsUser: 10001
+                  runAsGroup: 10001
+                  fsGroup: 10001
+                  seccompProfile:
+                    type: RuntimeDefault
+                containers:
+                  - name: probe
+                    image: {{ sentinel_netcheck_image }}
+                    imagePullPolicy: IfNotPresent
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - "printf '%s' '{{ sentinel_netcheck_namespace }}-worker' > /www/index.html; exec httpd -f -p 8080 -h /www"
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      capabilities:
+                        drop: ["ALL"]
+                      readOnlyRootFilesystem: true
+                    resources:
+                      requests:
+                        cpu: 10m
+                        memory: 16Mi
+                      limits:
+                        cpu: 100m
+                        memory: 64Mi
+                    volumeMounts:
+                      - name: www
+                        mountPath: /www
+                volumes:
+                  - name: www
+                    emptyDir:
+                      sizeLimit: 1Mi
+              ---
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: probe-service
+                namespace: {{ sentinel_netcheck_namespace }}
+              spec:
+                type: ClusterIP
+                selector:
+                  app: sentinel-probe
+                  role: cp
+                ports:
+                  - name: http
+                    port: 8080
+                    targetPort: 8080
+                    protocol: TCP
+            stdin_add_newline: true
+        - name: Wait until both diagnostic Pods are Ready
+          ansible.builtin.command:
+            argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, "{{ sentinel_netcheck_namespace }}", wait, --for=condition=Ready, pod/probe-cp, pod/probe-worker, --timeout=180s]
+          changed_when: false
+        - name: Read both diagnostic Pod IPs
+          ansible.builtin.command:
+            argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, "{{ sentinel_netcheck_namespace }}", get, pods, -o, json]
+          changed_when: false
+          register: sentinel_probe_pods
+        - name: Parse runtime Pod addresses
+          ansible.builtin.set_fact:
+            sentinel_probe_by_name: "{{ dict(((sentinel_probe_pods.stdout | from_json)['items']) | map(attribute='metadata.name') | zip((sentinel_probe_pods.stdout | from_json)['items'])) }}"
+        - name: Verify diagnostics landed on different intended nodes
+          ansible.builtin.assert:
+            that:
+              - sentinel_probe_by_name['probe-cp'].spec.nodeName == sentinel_cp
+              - sentinel_probe_by_name['probe-worker'].spec.nodeName == sentinel_worker
+              - sentinel_probe_by_name['probe-cp'].status.podIP is match('^10[.]244[.][0-9]+[.][0-9]+$')
+              - sentinel_probe_by_name['probe-worker'].status.podIP is match('^10[.]244[.][0-9]+[.][0-9]+$')
+              - sentinel_probe_by_name['probe-cp'].status.podIP != sentinel_probe_by_name['probe-worker'].status.podIP
+        - name: Probe Kubernetes DNS from control-plane Pod
+          ansible.builtin.command:
+            argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, "{{ sentinel_netcheck_namespace }}", exec, probe-cp, --, nslookup, kubernetes.default.svc.cluster.local]
+          changed_when: false
+          register: sentinel_dns_cp
+          retries: 3
+          delay: 3
+          until: sentinel_dns_cp.rc == 0
+        - name: Probe Kubernetes DNS from worker Pod
+          ansible.builtin.command:
+            argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, "{{ sentinel_netcheck_namespace }}", exec, probe-worker, --, nslookup, kubernetes.default.svc.cluster.local]
+          changed_when: false
+          register: sentinel_dns_worker
+          retries: 3
+          delay: 3
+          until: sentinel_dns_worker.rc == 0
+        - name: Resolve diagnostic Service from worker Pod
+          ansible.builtin.command:
+            argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, "{{ sentinel_netcheck_namespace }}", exec, probe-worker, --, nslookup, "probe-service.{{ sentinel_netcheck_namespace }}.svc.cluster.local"]
+          changed_when: false
+        - name: Test worker to control-plane direct Pod IP connection
+          ansible.builtin.command:
+            argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, "{{ sentinel_netcheck_namespace }}", exec, probe-worker, --, wget, -q, -T, '8', -O, '-', "http://{{ sentinel_probe_by_name['probe-cp'].status.podIP }}:8080/"]
+          changed_when: false
+          retries: 6
+          delay: 3
+          until: sentinel_worker_to_cp.rc == 0
+          register: sentinel_worker_to_cp
+        - name: Test control-plane to worker direct Pod IP connection
+          ansible.builtin.command:
+            argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, "{{ sentinel_netcheck_namespace }}", exec, probe-cp, --, wget, -q, -T, '8', -O, '-', "http://{{ sentinel_probe_by_name['probe-worker'].status.podIP }}:8080/"]
+          changed_when: false
+          retries: 6
+          delay: 3
+          until: sentinel_cp_to_worker.rc == 0
+          register: sentinel_cp_to_worker
+        - name: Test Service DNS and ClusterIP HTTP routing from worker Pod
+          ansible.builtin.command:
+            argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", -n, "{{ sentinel_netcheck_namespace }}", exec, probe-worker, --, wget, -q, -T, '8', -O, '-', "http://probe-service.{{ sentinel_netcheck_namespace }}.svc.cluster.local:8080/"]
+          changed_when: false
+          retries: 6
+          delay: 3
+          until: sentinel_worker_service.rc == 0
+          register: sentinel_worker_service
+        - name: Require exact HTTP response from both directions and Service
+          ansible.builtin.assert:
+            that:
+              - sentinel_worker_to_cp.stdout == sentinel_netcheck_namespace ~ '-cp'
+              - sentinel_cp_to_worker.stdout == sentinel_netcheck_namespace ~ '-worker'
+              - sentinel_worker_service.stdout == sentinel_netcheck_namespace ~ '-cp'
+            fail_msg: DNS or cross-node Pod/Service routing failed
+        - name: Report actual active network tests
+          ansible.builtin.debug:
+            msg:
+              - "STAGE441_DNS_PASS: live DNS query succeeded on both nodes"
+              - "STAGE441_CROSS_NODE_PASS: direct Pod HTTP succeeded in both directions"
+              - "STAGE441_SERVICE_PASS: DNS and ClusterIP HTTP to cross-node endpoint succeeded"
+      always:
+        - name: Verify namespace ownership before any cleanup
+          ansible.builtin.command:
+            argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", get, namespace, "{{ sentinel_netcheck_namespace }}", -o, json]
+          register: sentinel_cleanup_ns
+          changed_when: false
+          when: sentinel_netcheck_created | default(false) | bool
+        - name: Require precise current run ownership marker
+          ansible.builtin.assert:
+            that:
+              - (sentinel_cleanup_ns.stdout | from_json).metadata.labels['sentinel.ai/run-id'] == sentinel_netcheck_namespace
+              - (sentinel_cleanup_ns.stdout | from_json).metadata.labels['app.kubernetes.io/managed-by'] == 'sentinel-stage44'
+            fail_msg: "Refusing to remove diagnostic namespace: owner marker mismatch"
+          when: sentinel_netcheck_created | default(false) | bool
+        - name: Remove only this run's owned diagnostic namespace
+          ansible.builtin.command:
+            argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", delete, namespace, "{{ sentinel_netcheck_namespace }}", --wait=true, --timeout=180s]
+          when: sentinel_netcheck_created | default(false) | bool
+        - name: Report diagnostic cleanup outcome
+          ansible.builtin.debug:
+            msg: "STAGE441_CLEANUP: owned diagnostic namespace {{ sentinel_netcheck_namespace }} removed or no resources created"
