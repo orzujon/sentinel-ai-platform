@@ -29,6 +29,24 @@ class Stage44Contract(unittest.TestCase):
                 self.assertNotIn("delete", argv)
                 self.assertNotIn("apply", argv)
 
+    def test_kubernetes_list_fields_are_accessed_as_keys_not_dict_methods(self):
+        import re
+        parser = next(t for t in self.tasks if t["name"] == "Parse Kubernetes evidence in memory")
+        facts = parser["ansible.builtin.set_fact"]
+        for name in ("sentinel_node_list", "sentinel_dns_endpoints",
+                     "sentinel_flannel_pods", "sentinel_system_pods"):
+            expr = facts[name]
+            self.assertIn("['items']", expr, name)
+            self.assertNotRegex(expr, r"\\.items\\b")
+        for sample in (
+            '{"apiVersion":"v1","kind":"List","items":[]}',
+            '{"apiVersion":"v1","kind":"List","items":[{"metadata":{"name":"sample"}}]}',
+        ):
+            import json
+            obj = json.loads(sample)
+            self.assertEqual(obj["items"], list(obj["items"]))
+            self.assertTrue(callable(obj.items))
+
     def test_required_acceptance_evidence_and_no_false_traffic_claim(self):
         tasks = {task["name"]: task for task in self.tasks}
         self.assertIn("Require exactly two expected Ready nodes with pinned versions and private IPs", tasks)
