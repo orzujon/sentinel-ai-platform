@@ -75,4 +75,21 @@ Assert-BlockedWith -Contains "explicit sandbox apply approval is missing" -Argum
     ApplyBaseline = $true
 }
 
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    PlanKubernetesInstall = $true
+}
+Assert-BlockedWith -Contains "private configuration clone is missing" -Arguments @{
+    InstallKubernetesPackages = $true
+    InstallApprovalToken = "INSTALL_SENTINEL_STAGE432_K8S_1372"
+}
+Assert-BlockedWith -Contains "separate Kubernetes package installation approval missing" -Arguments @{
+    InstallKubernetesPackages = $true
+}
+Assert-BlockedWith -Contains "installation token only valid" -Arguments @{
+    InstallApprovalToken = "INSTALL_SENTINEL_STAGE432_K8S_1372"
+}
+Assert-BlockedWith -Contains "choose exactly one Stage 4.2 or 4.3 mode" -Arguments @{
+    PlanKubernetesInstall = $true
+    InstallKubernetesPackages = $true
+}
 Write-Host "PASS: Stage 4.2 mode and approval preflight smoke tests"
