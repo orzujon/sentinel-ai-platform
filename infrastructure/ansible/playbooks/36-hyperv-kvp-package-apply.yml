@@ -1,0 +1,124 @@
+---
+# Level 1 Stage 5.3: install Hyper-V KVP tools on NEW, independently
+# authenticated Ubuntu guests only. Not wired to the existing Stage 4 runner.
+# No auto-trust of SSH, no automatic switch to this apply mode.
+- name: Validate all fresh sandbox guests before any KVP package changes
+  hosts: sentinel_sandbox
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  vars:
+    sentinel_expected_kvp_version: "7.0.0-42.42"
+  tasks:
+    - name: Require two exact guests and fresh-only controller authorisation
+      ansible.builtin.assert:
+        that:
+          - groups['sentinel_sandbox'] | sort == ['sentinel-l1-cp01', 'sentinel-l1-w01']
+          - sentinel_fresh_bootstrap | default(false) | bool
+          - sentinel_kvp_install_approved | default(false) | bool
+          - sentinel_kvp_ssh_identity_verified | default(false) | bool
+          - inventory_hostname in ['sentinel-l1-cp01', 'sentinel-l1-w01']
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '26.04'
+          - ansible_facts['architecture'] == 'x86_64'
+          - ansible_facts['service_mgr'] == 'systemd'
+        fail_msg: "BLOCKED: fresh, independently authenticated, separately approved two-node sandbox required"
+
+    - name: Detect existing Kubernetes state, even if services are not running
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /etc/kubernetes/admin.conf
+        - /etc/kubernetes/kubelet.conf
+        - /var/lib/kubelet/config.yaml
+        - /etc/kubernetes/bootstrap-kubelet.conf
+      register: sentinel_kvp_kube_markers
+
+    - name: Never install on an existing Kubernetes node
+      ansible.builtin.assert:
+        that:
+          - not (sentinel_kvp_kube_markers.results | map(attribute='stat.exists') | select | list)
+        fail_msg: "BLOCKED: existing Kubernetes state; no KVP daemon installation permitted"
+
+    - name: Query signed Ubuntu APT candidate
+      ansible.builtin.command:
+        argv: [apt-cache, policy, linux-cloud-tools-common]
+      register: sentinel_kvp_policy
+      changed_when: false
+
+    - name: Require reviewed exact APT candidate
+      ansible.builtin.assert:
+        that:
+          - "'Candidate: ' ~ sentinel_expected_kvp_version in sentinel_kvp_policy.stdout"
+        fail_msg: "BLOCKED: KVP package APT candidate drifted from reviewed version"
+
+    - name: Check existing installation without changing packages
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, '-f=${Version}', linux-cloud-tools-common]
+      register: sentinel_kvp_installed
+      changed_when: false
+      failed_when: false
+
+    - name: Block a different previously installed KVP package
+      ansible.builtin.assert:
+        that:
+          - sentinel_kvp_installed.rc != 0 or sentinel_kvp_installed.stdout == sentinel_expected_kvp_version
+        fail_msg: "BLOCKED: unreviewed existing linux-cloud-tools-common package"
+
+    - name: Verify python3-apt is already installed
+      ansible.builtin.command:
+        argv: [python3, -c, "import apt"]
+      changed_when: false
+
+- name: Apply pinned KVP daemon and validate service, one fresh node at a time
+  hosts: sentinel_sandbox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  serial: 1
+  vars:
+    sentinel_expected_kvp_version: "7.0.0-42.42"
+  tasks:
+    - name: Revalidate fresh-only approval before installing
+      ansible.builtin.assert:
+        that:
+          - sentinel_fresh_bootstrap | default(false) | bool
+          - sentinel_kvp_install_approved | default(false) | bool
+          - sentinel_kvp_ssh_identity_verified | default(false) | bool
+        fail_msg: "BLOCKED: fresh-only KVP installation permission missing"
+
+    - name: Install exact pinned Ubuntu KVP daemon package
+      ansible.builtin.apt:
+        name: "linux-cloud-tools-common={{ sentinel_expected_kvp_version }}"
+        state: present
+        update_cache: false
+        allow_downgrade: false
+        allow_change_held_packages: false
+        auto_install_module_deps: false
+        fail_on_autoremove: true
+
+    - name: Enable and start guest Hyper-V KVP integration service
+      ansible.builtin.systemd_service:
+        name: hv-kvp-daemon.service
+        enabled: true
+        state: started
+
+    - name: Confirm installed revision is still exact
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, '-f=${Version}', linux-cloud-tools-common]
+      register: sentinel_kvp_final_package
+      changed_when: false
+
+    - name: Check daemon is active via systemd
+      ansible.builtin.command:
+        argv: [systemctl, is-active, hv-kvp-daemon.service]
+      register: sentinel_kvp_active
+      changed_when: false
+
+    - name: Require installed package and active service
+      ansible.builtin.assert:
+        that:
+          - sentinel_kvp_final_package.stdout == sentinel_expected_kvp_version
+          - sentinel_kvp_active.stdout == 'active'
+        fail_msg: "BLOCKED: KVP package or guest service verification failed"
