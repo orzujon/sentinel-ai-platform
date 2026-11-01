@@ -33,6 +33,10 @@ foreach ($required in @(
     'ssh-keyscan.exe',
     'StrictHostKeyChecking=yes',
     'sudo -n python3 -',
+    'sudo -n python3 - --mode plan',
+    'sudo -n python3 - --mode publish',
+    '$python | & $ssh @sshArgs',
+    '$OutputEncoding = [Text.UTF8Encoding]::new($false)',
     'EVIDENCE_ONLY',
     'trusted=false'
 )) {
@@ -57,4 +61,19 @@ try {
         throw "Publisher rejected incorrectly: $($_.Exception.Message)"
     }
 }
+# Regression: Windows PowerShell must stream a long Python script through native
+# process stdin, NOT embed single quotes in an SSH remote shell command.
+foreach ($forbidden in @("printf '%s'", 'base64 -d', 'ToBase64String')) {
+    if ($source.Contains($forbidden)) {
+        throw "KVP SSH shell quoting regression: found forbidden transport: $forbidden"
+    }
+}
+$publisher = Join-Path $root 'src\publish_worker_replica_kvp.py'
+$python = Get-Content -LiteralPath $publisher -Raw -Encoding UTF8
+$OutputEncoding = [Text.UTF8Encoding]::new($false)
+$stdinTest = $python | & python -c "import sys; compile(sys.stdin.read(), 'guest-publisher', 'exec'); print('PYTHON_STDIN_COMPILE_PASS')"
+if ($LASTEXITCODE -ne 0 -or $stdinTest -ne 'PYTHON_STDIN_COMPILE_PASS') {
+    throw 'BLOCKED: Windows PowerShell failed streaming UTF-8 guest publisher to native Python stdin'
+}
+Write-Host 'PASS: Windows native stdin transport compiles the entire publisher without SSH shell interpolation'
 Write-Host 'PASS: public-key KVP workflow has exact VM/nonce mapping and refuses unapproved guest publication'
