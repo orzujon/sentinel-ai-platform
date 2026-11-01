@@ -286,3 +286,26 @@ APT, install packages or change running services. The Stage 5.3 orchestration
 still needs an authenticated fresh-VM-only execution path, verified
 package/service installation, and host-key KVP publisher. **Do not execute
 fresh-only steps on the existing Kubernetes cluster.**
+
+
+### Stage 5.3 — Approval-gated KVP daemon installation (not yet wired to runner)
+
+`infrastructure/ansible/playbooks/36-hyperv-kvp-package-apply.yml`
+now defines a two-phase installer for **new, independently SSH-authenticated**
+Ubuntu 26.04 sandbox VMs only. It first checks **both** guests for the exact
+inventory, approval flags, Kubernetes state markers and reviewed APT package
+revision (`7.0.0-42.42`). Only after both pass does it install the exact
+`linux-cloud-tools-common` version **serially**, start and enable
+`hv-kvp-daemon.service`, and check the installed version and active service.
+
+The apply playbook requires controller-injected booleans
+`sentinel_fresh_bootstrap`, `sentinel_kvp_install_approved`, and
+`sentinel_kvp_ssh_identity_verified` all true. These booleans are not proof
+of identity by themselves. The current Stage 4 management runner does **not**
+expose this new installation mode, because trustworthy first-boot SSH
+onboarding has not yet been integrated. No existing VM should be targeted.
+
+Ansible syntax and offline safety tests run in CI. Live install acceptance
+requires a separately approved **disposable** fresh Ubuntu environment,
+including a verified host identity. This is an explicit prerequisite, not
+permission to change the running Sentinel Kubernetes cluster.
