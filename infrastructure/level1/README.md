@@ -374,3 +374,44 @@ a disposable guest, generate and seal its provisioning nonce, install and
 validate the KVP daemon, perform an actual KVP publication test, retrieve
 host-side evidence, compare the network SSH key and test authentication.
 Protect the existing two-node Kubernetes sandbox throughout.
+
+
+### Disposable E2E provisioner — explicit approval only
+
+`infrastructure/level1/tools/New-SentinelDisposableE2E.ps1` is a separate,
+**one-VM-only**, non-destructive creation workflow for
+`sentinel-e2e-ssh01`. The default `-Mode PLAN` checks isolated host
+capacity, verifies a supplied reviewed Ubuntu 26.04 cloud image and SHA256,
+checks WSL disk/seed tools and the local SSH login public key, and performs
+no writes. Its separately approved `-Mode CREATE` uses the existing WSL
+`qemu-img`/`cloud-localds` helper and boots a generation-2 Ubuntu VM on
+Hyper-V Default Switch, in `C:\Sentinel\E2E-Disposable`. The seed carries
+an independent per-VM nonce and configures an SSH user and version-pinned
+Ubuntu KVP daemon package. No automatic cleanup or destructive rollback.
+
+First discover the exact cached approved image path and its SHA256 on your
+Windows machine; **do not assume a hash**. Example:
+
+```powershell
+Get-ChildItem C:\Sentinel\ImageCache -Recurse -File -Filter ubuntu-26.04-server-cloudimg-amd64.img |
+  Select-Object FullName,@{N='SHA256';E={(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash}}
+```
+
+Then review and plan with the actual approved hash before authorising creation:
+
+```powershell
+.\infrastructure\level1\tools\New-SentinelDisposableE2E.ps1 -Mode PLAN \\
+  -ImagePath 'C:\Sentinel\ImageCache\<approved-path>\ubuntu-26.04-server-cloudimg-amd64.img' \\
+  -ImageSHA256 '<reviewed-64-character-sha256>'
+```
+
+The above multiline command illustrates parameters, not literal PowerShell
+line continuation; supply the parameters on one line or use PowerShell
+backticks. After a successful plan and explicit approval for a distinct
+VM, use `-Mode CREATE -Approval CREATE_DISPOSABLE_SENTINEL_E2E_SSH01`.
+It prompts for exact confirmation. A partial failure leaves artifacts for
+manual inspection and never deletes or adopts resources. **Creating this VM
+is not a full SSH/KVP end-to-end PASS.** We still need verified Hyper-V KVP
+interoperability, correctly bound fresh evidence collection, and network SSH
+identity checks. Do not use the older Stage 3 `infra-provision` to perform
+this acceptance; its two pinned names are occupied by the working lab.
