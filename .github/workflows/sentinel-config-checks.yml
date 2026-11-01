@@ -72,6 +72,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Exercise cross-platform guest KVP publisher offline tests on Windows
+        shell: powershell
+        run: python -m unittest discover -s infrastructure/ansible/tests -p 'test_publish_guest_kvp_hostkey.py' -v
       - name: Validate Stage 4 Windows-to-WSL entrypoint syntax
         shell: powershell
         run: |
