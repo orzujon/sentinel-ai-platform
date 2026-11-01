@@ -65,6 +65,8 @@ jobs:
         run: python -m py_compile infrastructure/ansible/run_readiness.py infrastructure/ansible/reconcile.py
       - name: Test exact disposable KVP five-package transaction gate
         run: python -m unittest discover -s infrastructure/level1/tests -p 'test_worker_replica_kvp_simulation.py' -v
+      - name: Test matching-kernel KVP recovery simulation and fail-closed limits
+        run: python -m unittest discover -s infrastructure/level1/tests -p 'test_worker_replica_kvp_kernel_recovery.py' -v
       - name: Execute Level 1 static package tests
         run: python -m unittest discover -s infrastructure/level1/tests -p 'test_*.py' -v
       - name: Demonstrate read-only sample plan
