@@ -117,9 +117,9 @@ case "$2" in
   *) exit 8 ;;
 esac
 if [ "${BLOCK_CANDIDATE:-}" = "$2" ]; then version='(none)'; fi
-printf 'Installed: (none)\\nCandidate: %s\\n' "$version"
-head -c 150000 /dev/zero | tr '\\000' 'x'
-printf '\\n'
+printf 'Installed: (none)\nCandidate: %s\n' "$version"
+head -c 150000 /dev/zero | tr '\000' 'x'
+printf '\n'
 """
         with tempfile.TemporaryDirectory() as directory:
             mock = Path(directory) / "apt-cache"
@@ -127,11 +127,11 @@ printf '\\n'
             mock.chmod(0o755)
             base_env = os.environ.copy()
             base_env["PATH"] = directory + os.pathsep + base_env["PATH"]
-            code = ("set -euo pipefail\\n"
-                    "kernel=7.0.0-38-generic\\n"
-                    "generic_base=7.0.0-38\\n"
+            code = ("set -euo pipefail\n"
+                    "kernel=7.0.0-38-generic\n"
+                    "generic_base=7.0.0-38\n"
                     + candidate_loop
-                    + "echo CANDIDATES_PASS\\n")
+                    + "echo CANDIDATES_PASS\n")
             success = subprocess.run(["bash", "-c", code], env=base_env,
                                      capture_output=True, text=True, timeout=15)
             self.assertEqual(success.returncode, 0, success.stderr)
