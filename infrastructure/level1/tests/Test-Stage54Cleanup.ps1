@@ -57,6 +57,10 @@ foreach ($required in @(
     'Remove-VM -VM',
     'Remove-Item -LiteralPath $folder',
     'Stop-VM -VM $again -Shutdown',
+    'CLEANUP_UNRECOGNISED_ENTRY:',
+    'CLEANUP_UNRECOGNISED_ENTRIES:',
+    'no deletion performed',
+    'review each path before changing allowlist',
     'STAGE54_CLEANUP_PLAN_READY',
     'STAGE54_DISPOSABLE_CLEANUP_COMPLETE',
     'foreign VM',
@@ -68,6 +72,13 @@ foreach ($forbidden in @('Stop-VM -TurnOff','Stop-VM -Force','Remove-VMSwitch','
     if ($source.Contains($forbidden)) {
         throw "BLOCKED: cleanup has unsafe operation or unexpected external command: $forbidden"
     }
+}
+# Unknown entries must be listed for review, NEVER deleted or adopted.
+# Maintain the original explicit top-level allowlist; no wildcard additions.
+if (-not $source.Contains("if ($unexpected.Count -ne 0)") -or
+    -not $source.Contains("foreach ($item in $unexpected)") -or
+    $source.Contains("'*'")) {
+    throw 'BLOCKED: cleanup unexpectedly broadens the deletion allowlist'
 }
 if (-not $createSource.Contains('STAGE54_CLEANUP_REQUIRED') -or
     -not $createSource.Contains('sentinel-e2e-(w02|ssh01|auto2[0-9])') -or
