@@ -32,7 +32,7 @@ apt-get install -y --no-install-recommends --no-remove "${packages[@]}"
 # Never retrigger other devices and never bypass the host-side KVP attestation.
 device='/sys/devices/virtual/misc/vmbus!hv_kvp'
 rule='/usr/lib/udev/rules.d/60-hv-kvp-daemon.rules'
-unit='sys-devices-virtual-misc-vmbus\\x21hv_kvp.device'
+unit='sys-devices-virtual-misc-vmbus\x21hv_kvp.device'
 [[ -e "$device" && -c /dev/vmbus/hv_kvp && -f "$rule" ]] ||
   { echo 'BLOCKED: KVP device or packaged udev rule absent' >&2; exit 2; }
 grep -Fq 'TAG+="systemd"' "$rule" && grep -Fq 'SYSTEMD_WANTS' "$rule" ||
