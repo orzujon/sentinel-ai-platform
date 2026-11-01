@@ -88,10 +88,10 @@ foreach ($forbidden in @('Stop-VM -TurnOff','Stop-VM -Force','Remove-VMSwitch','
 if (-not $source.Contains('if ($allowNested) { $topAllowed += $name }') -or
     -not $source.Contains('if (-not (Test-InFolder -Candidate ([string]$vm.Path) -Directory $nested))') -or
     -not $source.Contains('$configFiles.Count -ne 1') -or
-    -not $source.Contains("if ($unownedConfig.Count -ne 0)") -or
-    -not $source.Contains("if ($unexpectedNested.Count -ne 0)") -or
+    -not $source.Contains('if ($unownedConfig.Count -ne 0)') -or
+    -not $source.Contains('if ($unexpectedNested.Count -ne 0)') -or
     -not $source.Contains('Snapshots') -or
-    -not $source.Contains("if ($unexpected.Count -ne 0)")) {
+    -not $source.Contains('if ($unexpected.Count -ne 0)')) {
     throw 'BLOCKED: same-name nested Hyper-V configuration must retain VM UUID and strict file ownership checks'
 }
 # Unknown entries must be listed for review, NEVER deleted or adopted.
