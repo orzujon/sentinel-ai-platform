@@ -71,7 +71,9 @@ foreach ($forbidden in @("printf '%s'", 'base64 -d', 'ToBase64String')) {
 $publisher = Join-Path $root 'src\publish_worker_replica_kvp.py'
 $python = Get-Content -LiteralPath $publisher -Raw -Encoding UTF8
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
-$stdinTest = $python | & python -c "import sys; compile(sys.stdin.read(), 'guest-publisher', 'exec'); print('PYTHON_STDIN_COMPILE_PASS')"
+# Read raw bytes to match remote 'python3 -' source decoding. On Windows,
+# sys.stdin.read() may use the console code page and misinterpret a UTF-8 BOM.
+$stdinTest = $python | & python -c "import sys; raw=sys.stdin.buffer.read(); assert raw.lstrip(bytes.fromhex('efbbbf')).startswith(b'#!/usr/bin/env python3'); compile(raw, 'guest-publisher', 'exec'); print('PYTHON_STDIN_COMPILE_PASS')"
 if ($LASTEXITCODE -ne 0 -or $stdinTest -ne 'PYTHON_STDIN_COMPILE_PASS') {
     throw 'BLOCKED: Windows PowerShell failed streaming UTF-8 guest publisher to native Python stdin'
 }
