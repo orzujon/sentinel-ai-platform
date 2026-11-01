@@ -39,4 +39,16 @@ Expect-Blocked { Assert-SentinelKvpIdentity -ManifestEntry $entry -ActualVMId $v
 $badFP = $serialized.Replace($fp, 'SHA256:incorrect')
 Expect-Blocked { Assert-SentinelKvpIdentity -ManifestEntry $entry -ActualVMId $vmId -GuestData $badFP }
 Expect-Blocked { Get-SentinelHostKeyFingerprint -PublicKey 'ssh-rsa invalid' }
+
+# The worker replica is a separate pinned disposable VM; no live VM is queried.
+$w02Id = [guid]::NewGuid().ToString()
+$w02 = [pscustomobject]@{ node='sentinel-e2e-w02'; ip='10.78.0.12'; vmId=$w02Id; nonce=('c' * 64) }
+$w02Payload = [ordered]@{ schema=1; node=$w02.node; ip=$w02.ip; nonce=$w02.nonce; publicKey=$key; fingerprint=$fp } | ConvertTo-Json -Compress
+$w02Match = Assert-SentinelKvpIdentity -ManifestEntry $w02 -ActualVMId $w02Id -GuestData $w02Payload
+if ($w02Match.node -cne 'sentinel-e2e-w02' -or $w02Match.ip -cne '10.78.0.12' -or $w02Match.trusted) {
+    throw 'Disposable guest KVP evidence did not remain untrusted and correctly bound'
+}
+Expect-Blocked { Assert-SentinelKvpIdentity -ManifestEntry $w02 -ActualVMId ([guid]::NewGuid().ToString()) -GuestData $w02Payload }
+Expect-Blocked { Assert-SentinelKvpIdentity -ManifestEntry $w02 -ActualVMId $w02Id -GuestData ($w02Payload.Replace('10.78.0.12','10.78.0.11')) }
+Expect-Blocked { Assert-SentinelKvpIdentity -ManifestEntry $w02 -ActualVMId $w02Id -GuestData ($w02Payload.Replace(('c' * 64),('d' * 64))) }
 Write-Host 'PASS: Hyper-V KVP evidence validation, VM ID, nonce, duplicates and host-key safety'
