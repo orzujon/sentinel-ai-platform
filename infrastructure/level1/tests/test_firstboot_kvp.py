@@ -88,6 +88,16 @@ class FirstBootKvpTests(unittest.TestCase):
                 mod.publish(pool,val,fixture=True)
             self.assertEqual(real.read_bytes(),b"")
 
+    def test_regression_previous_live_kvp_recovery_requires_targeted_udev_activation(self):
+        sh = SRC.with_name("firstboot-kvp-setup.sh").read_text("utf-8")
+        self.assertIn("linux-cloud-tools-${kernel}", sh)
+        self.assertIn("udevadm control --reload", sh)
+        self.assertIn('udevadm trigger --action=add "$device"', sh)
+        self.assertIn("udevadm settle --timeout=20", sh)
+        self.assertIn("systemctl is-active --quiet hv-kvp-daemon.service", sh)
+        self.assertIn("--no-remove", sh)
+        self.assertNotIn("udevadm trigger --action=add --subsystem-match", sh)
+
     def test_invalid_host_key_encoding_never_embedded(self):
         for pub in ("ssh-rsa AAAA","ssh-ed25519 !!!","not-a-key",good_key()+"\n"+good_key()):
             with self.subTest(pub=pub[:20]):
