@@ -5,10 +5,12 @@ export DEBIAN_FRONTEND=noninteractive
 STATUS=/var/lib/sentinel/firstboot-kvp.status
 install -d -m 0700 /var/lib/sentinel
 mark_failed() {
+  local failed_line="${1:-unknown}"
+  local failed_rc="${2:-1}"
   printf 'BLOCKED\n' > "$STATUS"
-  echo 'FIRSTBOOT_KVP_BLOCKED: use guest console, never TOFU SSH' >&2
+  printf 'FIRSTBOOT_KVP_BLOCKED: line=%s rc=%s; use guest console, never TOFU SSH\n' "$failed_line" "$failed_rc" >&2
 }
-trap mark_failed ERR
+trap 'mark_failed "$LINENO" "$?"' ERR
 [[ $(id -u) -eq 0 ]] || { echo 'BLOCKED: root required' >&2; exit 2; }
 [[ -f /etc/sentinel/bootstrap.json ]] || { echo 'BLOCKED: seed config missing' >&2; exit 2; }
 [[ -f /usr/local/lib/sentinel/publish_firstboot_kvp.py ]] || { echo 'BLOCKED: publisher missing' >&2; exit 2; }
@@ -19,7 +21,14 @@ kernel="$(uname -r)"
   { echo 'BLOCKED: unrecognised kernel ABI' >&2; exit 2; }
 generic_base="${kernel%-generic}"
 echo "FIRSTBOOT_KVP_PACKAGE_PLAN: kernel=$kernel"
-apt-get update -o Acquire::Retries=1 -o Acquire::http::Timeout=20
+# DNS failures must be reported explicitly; cloud-init's openssh package stage
+# might already have succeeded, but that does not prove DNS still works.
+if ! getent ahostsv4 archive.ubuntu.com >/dev/null; then
+  echo 'BLOCKED: guest DNS cannot resolve archive.ubuntu.com before KVP APT' >&2
+  exit 2
+fi
+echo 'FIRSTBOOT_KVP_DNS_PASS: archive.ubuntu.com'
+apt-get update -o APT::Update::Error-Mode=any -o Acquire::Retries=1 -o Acquire::http::Timeout=20
 packages=(linux-cloud-tools-common "linux-cloud-tools-${generic_base}" "linux-cloud-tools-${kernel}")
 for package in "${packages[@]}"; do
   # Do not exit awk early under pipefail: apt-cache may receive SIGPIPE
@@ -30,7 +39,9 @@ for package in "${packages[@]}"; do
   [[ -n "$candidate" && "$candidate" != "(none)" ]] ||
     { echo "BLOCKED: missing signed Ubuntu package candidate for $package" >&2; exit 2; }
 done
+echo 'FIRSTBOOT_KVP_PACKAGE_CANDIDATES_PASS: starting guarded signed APT installation'
 apt-get install -y --no-install-recommends --no-remove "${packages[@]}"
+echo 'FIRSTBOOT_KVP_PACKAGES_INSTALLED: verifying targeted udev activation'
 # Previous Stage 5.3 live acceptance required replaying the specific KVP
 # udev add event: the VMBus device appeared before the package rule existed.
 # Never retrigger other devices and never bypass the host-side KVP attestation.
