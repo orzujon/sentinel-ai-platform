@@ -344,3 +344,33 @@ trusted-hosts registrar. Until full live acceptance Step 40 remains
 `ready: false`.
 
 Source: <https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/integration-services-data-exchange>.
+
+
+### Stage 5.3 — First real disposable end-to-end acceptance
+
+We have **not** yet executed the guest publisher against the real Linux KVP
+daemon. Synthetic pool tests do not prove daemon interoperability, and direct
+pool writes require validation on a disposable guest before promotion.
+The current Stage 3 provisioner is pinned to `sentinel-l1-cp01` and
+`sentinel-l1-w01`; it must never be used for this acceptance run because
+those VM names already host the working cluster.
+
+Start from Windows PowerShell, read-only:
+
+```powershell
+cd C:\Users\Orzu\projects\sentinel-ai-platform
+git switch feature/stage53-clean-bootstrap
+git pull --ff-only origin feature/stage53-clean-bootstrap
+.\infrastructure\level1\tools\Test-SentinelDisposableE2E.ps1
+```
+
+The checker proposes **one** distinct `sentinel-e2e-ssh01` VM, backed by
+`C:\Sentinel\E2E-Disposable`, 3 GiB RAM, 30 GiB disk, attached to the
+existing Hyper-V Default Switch. It inspects host resource headroom, refuses
+a pre-existing target name or path and does not create, start or modify
+any VM. `READY_FOR_REVIEW` is only a capacity/isolation verdict—not
+provisioning approval. A later implementation must securely build and identify
+a disposable guest, generate and seal its provisioning nonce, install and
+validate the KVP daemon, perform an actual KVP publication test, retrieve
+host-side evidence, compare the network SSH key and test authentication.
+Protect the existing two-node Kubernetes sandbox throughout.
