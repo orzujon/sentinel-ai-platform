@@ -21,6 +21,7 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot '..\src\Sentinel.HyperVDisposableLayout.psm1') -Force -ErrorAction Stop
 
 # Enforce mutation permission before querying Hyper-V, reading storage or
 # calling any removable cmdlet. Approval is scoped to the target family.
@@ -153,35 +154,12 @@ function Assert-CurrentSafety {
             }
             throw 'BLOCKED: nested Hyper-V configuration contains unknown top-level entries'
         }
-        # Require a single VM configuration file named by the independently
-        # validated Hyper-V ID; do not trust name-only folder matches.
-        $configDir = Join-Path $nested 'Virtual Machines'
-        if (-not (Test-Path -LiteralPath $configDir -PathType Container)) {
-            throw 'BLOCKED: nested Hyper-V configuration folder missing Virtual Machines'
-        }
-        $configFiles = @(Get-ChildItem -LiteralPath $configDir -Force -File -Filter '*.vmcx' -ErrorAction Stop)
-        if ($configFiles.Count -ne 1 -or
-            $configFiles[0].BaseName -ine ([string]$ExpectedVMId)) {
-            Write-Host ("CLEANUP_CONFIG_FILE_CANDIDATES: {0}" -f
-                (($configFiles | Select-Object -ExpandProperty Name) -join ','))
-            throw 'BLOCKED: nested Hyper-V configuration VM UUID .vmcx does not match'
-        }
-        # Check other files under the config folder are Hyper-V-owned by
-        # the same VM UUID. Foreign files block; no wildcard allowance.
-        $configEntries = @(Get-ChildItem -LiteralPath $configDir -Force -ErrorAction Stop)
-        $validConfigNames = @(
-            ([string]$ExpectedVMId + '.vmcx'),
-            ([string]$ExpectedVMId + '.vmrs'),
-            ([string]$ExpectedVMId + '.vmgs')
-        )
-        $unownedConfig = @($configEntries | Where-Object {
-            $_.PSIsContainer -or $_.Name -notin $validConfigNames
-        })
-        if ($unownedConfig.Count -ne 0) {
-            foreach ($entry in $unownedConfig) {
-                Write-Host ("CLEANUP_UNOWNED_CONFIG_ENTRY: {0}" -f $entry.FullName)
-            }
-            throw 'BLOCKED: VM configuration includes unknown or foreign files'
+        # Verify exactly one GUID.vmcx and only GUID.vmrs/.vmgs plus an
+        # optional GUID-named runtime directory with strictly permitted
+        # contents. This is an offline, read-only layout validator.
+        $layoutStatus = Assert-SentinelHyperVConfigLayout -ConfigDirectory $configDir -ExpectedVMId $ExpectedVMId
+        if ($layoutStatus -cne 'VERIFIED') {
+            throw 'BLOCKED: exact Hyper-V VM UUID configuration layout not verified'
         }
         # The disk is located at the outer folder, and this lab has no
         # checkpoints. Therefore other nested Hyper-V folders must be empty.
