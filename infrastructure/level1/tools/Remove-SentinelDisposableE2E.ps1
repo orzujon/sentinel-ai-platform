@@ -87,9 +87,21 @@ if (-not (Test-PathBelow -Path ([string]$vm.Path) -Directory $folder)) {
     throw 'BLOCKED: VM configuration resides outside disposable VM directory'
 }
 $disks = @(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop)
-if ($disks.Count -ne 1 -or -not
-    [string]::Equals([string]$disks[0].Path,$expectedDisk,[StringComparison]::OrdinalIgnoreCase)) {
-    throw 'BLOCKED: unexpected VM disk attachment'
+# Show the exact Hyper-V layout on mismatch; never infer ownership or delete.
+$diskPaths = @($disks | ForEach-Object {
+    if ([string]::IsNullOrWhiteSpace([string]$_.Path)) { '<blank>' } else { [string]$_.Path }
+})
+$diskValid = $false
+if ($disks.Count -eq 1 -and -not [string]::IsNullOrWhiteSpace([string]$disks[0].Path)) {
+    $diskValid = [string]::Equals(
+        [IO.Path]::GetFullPath([string]$disks[0].Path),
+        [IO.Path]::GetFullPath($expectedDisk),
+        [StringComparison]::OrdinalIgnoreCase
+    )
+}
+if (-not $diskValid) {
+    throw ("BLOCKED: unexpected VM disk attachment. Expected one attached disk '{0}'; Hyper-V returned {1}: {2}. No modifications performed." -f
+        $expectedDisk, $disks.Count, ($diskPaths -join ' ; '))
 }
 $dvds = @(Get-VMDvdDrive -VM $vm -ErrorAction Stop)
 if ($dvds.Count -ne 1 -or -not
