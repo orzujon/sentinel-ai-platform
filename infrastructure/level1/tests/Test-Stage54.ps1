@@ -80,7 +80,7 @@ foreach ($req in @(
     "HostKeyAlgorithms=ssh-ed25519",
     "PasswordAuthentication=no",
     "BatchMode=yes",
-    "UserKnownHostsFile=$trustedFile",
+    'UserKnownHostsFile=$trustedFile',
     "IdentityAgent=none",
     "GlobalKnownHostsFile=/dev/null",
     "ANSIBLE_HOST_KEY_CHECKING=True",
