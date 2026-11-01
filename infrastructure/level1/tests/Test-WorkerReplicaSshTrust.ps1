@@ -5,6 +5,7 @@ $ErrorActionPreference = 'Stop'
 
 $root = Join-Path $PSScriptRoot '..'
 $entrypoint = Join-Path $root 'tools\Invoke-SentinelWorkerReplicaSshTrust.ps1'
+$kvpModuleFile = Join-Path $root 'src\Sentinel.KvpEvidence.psm1'
 $moduleFile = Join-Path $root 'src\Sentinel.SshTrust.psm1'
 foreach ($path in @($entrypoint,$moduleFile)) {
     $tokens = $null; $parseErrors = $null
@@ -82,7 +83,28 @@ foreach ($required in @(
         throw "Missing protected atomic trust-store safety contract: $required"
     }
 }
+# Exact sequence used by the real Stage 5.3.4 entrypoint. In particular,
+# a nested -Force re-import must never erase KVP exports from script scope.
+Import-Module $kvpModuleFile -Force -ErrorAction Stop
 Import-Module $moduleFile -Force -ErrorAction Stop
+foreach ($function in @(
+    'ConvertFrom-SentinelKvpXml',
+    'Assert-SentinelKvpIdentity',
+    'Get-SentinelHostKeyFingerprint',
+    'Get-SentinelTrustedHostLine',
+    'Get-SentinelTrustStoreState',
+    'Register-SentinelTrustedHostFile'
+)) {
+    if (-not (Get-Command $function -CommandType Function -ErrorAction SilentlyContinue)) {
+        throw "BLOCKED: missing exported command after both module imports: $function"
+    }
+}
+# Reload trust module as a separate operation: KVP functions must remain visible.
+Import-Module $moduleFile -Force -ErrorAction Stop
+if (-not (Get-Command ConvertFrom-SentinelKvpXml -CommandType Function -ErrorAction SilentlyContinue)) {
+    throw 'BLOCKED: Stage 5.3.4 regression: trust module reload hid KVP XML parser'
+}
+Write-Host 'PASS: Stage 5.3.4 shared KVP parser remains callable after trust module imports'
 $wire = [byte[]](0,0,0,11) + [Text.Encoding]::ASCII.GetBytes('ssh-ed25519') +
         [byte[]](0,0,0,32) + ([byte[]](18) * 32)
 $key = 'ssh-ed25519 ' + [Convert]::ToBase64String($wire)
