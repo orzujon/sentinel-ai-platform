@@ -147,6 +147,9 @@ jobs:
       - name: Verify reusable Stage54 no-TOFU fresh VM to Ansible bootstrap contract
         shell: powershell
         run: .\infrastructure\level1\tests\Test-Stage54.ps1
+      - name: Verify Stage54 guarded cleanup approval, UUID binding and cleanup-first gate
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-Stage54Cleanup.ps1
       - name: Verify worker-shaped two-NIC disposable VM and safety contracts offline
         shell: powershell
         run: .\infrastructure\level1\tests\Test-WorkerReplicaContract.ps1
