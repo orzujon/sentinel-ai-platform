@@ -129,3 +129,29 @@ wsl.exe -d Ubuntu-26.04 --exec timeout 8s ssh-keygen -y -f /home/orzu/.ssh/id_ed
 It checks that the WSL Ansible private key derives the same ED25519 public
 login key cloud-init authorises. No private key is copied. A mismatch blocks
 the plan before a VM can be created.
+
+
+### w02 cleanup: UUID-named Hyper-V runtime directory
+
+During a live read-only PLAN, Hyper-V's nested configuration path
+`C:\Sentinel\E2E-WorkerReplica\sentinel-e2e-w02\sentinel-e2e-w02\Virtual Machines`
+contained the original VM's `.vmcx`, `.vmgs`, `.vmrs` and an additional
+`7CE061EB-AC7A-43D6-BDDB-A22070D2C6F9` directory. This is a legitimate
+configuration layout candidate, but filename similarity alone is insufficient
+to approve deletion.
+
+`Sentinel.HyperVDisposableLayout.psm1` now permits the UUID runtime directory
+only when the actual Hyper-V VM.Path is inside the same named VM folder,
+the independent provisioner VM UUID agrees with the live VM, exactly one
+matching `.vmcx` exists, all configuration file names are from the exact VM
+UUID, and the optional runtime folder is empty or contains only UUID-named
+`.bin`/`.vsv` files. Unknown entries remain BLOCKED and are reported with
+their precise paths; symbolic links, checkpoint files, differencing disks,
+foreign VM attachments, extra configuration entries and changed VHD/ISO
+bindings still fail closed.
+
+CI exercises positive and negative cases with temporary filesystem fixtures;
+it does **not** run REMOVE against the live Hyper-V host. Retry PLAN and
+confirm `CLEANUP_VM_UUID_RUNTIME_VERIFIED`,
+`CLEANUP_VM_CONFIG_FILES_VERIFIED` and `STAGE54_CLEANUP_PLAN_READY` before
+using any separately approved destructive cleanup command.
