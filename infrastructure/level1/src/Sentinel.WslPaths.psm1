@@ -12,7 +12,7 @@ function ConvertTo-SentinelWslMountPath {
         throw 'BLOCKED: only absolute, local drive paths can be passed to WSL'
     }
     $drive = $Matches['drive'].ToLowerInvariant()
-    $tail = $Matches['relative'].Replace('\\','/')
+    $tail = $Matches['relative'].Replace([char]92, [char]47)
     if ($tail -match '[\r\n]') { throw 'BLOCKED: unsafe WSL path' }
     return "/mnt/$drive/$tail"
 }
