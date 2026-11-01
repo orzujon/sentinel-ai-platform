@@ -64,7 +64,8 @@ function Test-InFolder([string]$Candidate,[string]$Directory) {
     if ([string]::IsNullOrWhiteSpace($Candidate)) { return $false }
     $full = [IO.Path]::GetFullPath($Candidate).TrimEnd('\')
     $base = [IO.Path]::GetFullPath($Directory).TrimEnd('\')
-    return $full.StartsWith($base + '\',[StringComparison]::OrdinalIgnoreCase)
+    return ($full.Equals($base,[StringComparison]::OrdinalIgnoreCase) -or
+            $full.StartsWith($base + '\',[StringComparison]::OrdinalIgnoreCase))
 }
 function Assert-NotReparse([string]$Path) {
     $file = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
