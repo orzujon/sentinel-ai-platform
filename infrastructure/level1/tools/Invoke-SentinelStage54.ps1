@@ -28,6 +28,52 @@ if (-not (Test-Path -LiteralPath $create -PathType Leaf) -or
     -not (Test-Path -LiteralPath $trust -PathType Leaf)) {
     throw 'BLOCKED: pinned source components missing'
 }
+function Assert-AnsibleControllerReady {
+    if ($WSLPrivateKey -cnotmatch '^/home/[a-z][a-z0-9_-]*/\.ssh/id_ed25519 -Slot $Slot -ImagePath $ImagePath -ImageSHA256 $ImageSHA256
+    Write-Host 'STAGE54_ORCHESTRATOR_PLAN_READY: no VM or SSH trust change.'
+    return
+}
+# Explicit operator approval is split into two scoped sub-step authorizations.
+& $create -Mode CREATE -Slot $Slot -ImagePath $ImagePath -ImageSHA256 $ImageSHA256 -Approval CREATE_FRESH_DISPOSABLE_SENTINEL_STAGE54
+Write-Host 'STAGE54_WAITING_FOR_FIRSTBOOT_KVP: no network SSH has been attempted.'
+$verified = $false
+for ($i=1; $i -le 120; $i++) {
+    try {
+        & $trust -Mode VERIFY -Slot $Slot
+        $verified = $true
+        break
+    } catch {
+        if ($i -eq 120) {
+            throw 'BLOCKED: no fresh KVP identity after 10 minutes; use VM console/cloud-init. Never auto-trust or retry VM creation.'
+        }
+        if ($i % 12 -eq 0) {
+            Write-Host "STAGE54_WAIT_KVP: first boot still pending after $($i * 5) seconds; no SSH fallback."
+        }
+        Start-Sleep -Seconds 5
+    }
+}
+if (-not $verified) { throw 'BLOCKED: KVP verification failed' }
+& $trust -Mode REGISTER -Slot $Slot -Approval REGISTER_KVP_VERIFIED_SENTINEL_STAGE54_HOST_KEY
+& $trust -Mode ACCEPT -Slot $Slot
+& $trust -Mode ANSIBLE -Slot $Slot -WSLPrivateKey $WSLPrivateKey
+Write-Host "STAGE54_ZERO_TOUCH_E2E_PASS: sentinel-e2e-auto$Slot; VM created -> KVP verified -> trusted SSH -> Ansible."
+) {
+        throw 'BLOCKED: existing WSL controller key must be /home/<user>/.ssh/id_ed25519'
+    }
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+        throw 'BLOCKED: WSL controller is not available'
+    }
+    & wsl.exe -d Ubuntu-26.04 --exec test -r $WSLPrivateKey
+    if ($LASTEXITCODE -ne 0) {
+        throw 'BLOCKED: pre-existing WSL Ansible SSH private identity missing or unreadable'
+    }
+    & wsl.exe -d Ubuntu-26.04 --exec ansible --version | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'BLOCKED: Ansible command unavailable in controller WSL Ubuntu-26.04'
+    }
+}
+# Fail early: inspect controller prerequisites before any VM CREATE.
+Assert-AnsibleControllerReady
 if ($Mode -eq 'PLAN') {
     & $create -Mode PLAN -Slot $Slot -ImagePath $ImagePath -ImageSHA256 $ImageSHA256
     Write-Host 'STAGE54_ORCHESTRATOR_PLAN_READY: no VM or SSH trust change.'
