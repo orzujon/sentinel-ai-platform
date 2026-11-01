@@ -272,7 +272,9 @@ if ($Mode -eq 'PLAN') {
 $again = Assert-CurrentSafety
 if ($again.Id -ne $ExpectedVMId) { throw 'BLOCKED: VM changed after cleanup PLAN' }
 if ($again.State -ne 'Off') {
-    Stop-VM -VM $again -Shutdown -ErrorAction Stop
+    # Stop-VM without -Force/-TurnOff requests an orderly guest OS shutdown.
+    # Hyper-V Stop-VM has no -Shutdown switch; do not introduce a forced-off fallback.
+    Stop-VM -VM $again -ErrorAction Stop
     $stopped = $false
     for ($attempt=0; $attempt -lt 30; $attempt++) {
         $state = @(Get-VM -Name $name -ErrorAction Stop)
