@@ -389,31 +389,34 @@ Hyper-V Default Switch, in `C:\Sentinel\E2E-Disposable`. The seed carries
 an independent per-VM nonce and configures an SSH user and version-pinned
 Ubuntu KVP daemon package. No automatic cleanup or destructive rollback.
 
-Stage 2 stores an approved Ubuntu image under a SHA256 **digest filename**,
-not the original upstream name. Confirm its path and matching digest with
-the local private Stage 2 configuration (do not put private settings in git):
+Stage 2 uses SHA256-named images under
+\`C:\Sentinel\ImageCache\ubuntu\26.04\<build-id>\<digest>.img\`, and normally
+places a neighboring \`<digest>.json\` file containing the source URL, build,
+digest, size and acquisition metadata. \`config/lab.json\` is private and is
+**not necessarily present** in a fresh Git checkout. Do not treat its absence
+as evidence that the image checksum is incorrect.
 
-```powershell
-$config = Get-Content .\infrastructure\level1\config\lab.json -Raw | ConvertFrom-Json
-$digest = [string]$config.image.expectedSha256
-$image = Join-Path $config.paths.imageCache ("ubuntu\26.04\$($config.image.buildId)\$($digest.ToLowerInvariant()).img")
-[pscustomobject]@{
-  ImagePath = $image
-  Exists = Test-Path -LiteralPath $image -PathType Leaf
-  ExpectedSHA256 = $digest
-  ActualSHA256 = if (Test-Path -LiteralPath $image -PathType Leaf) { (Get-FileHash -LiteralPath $image -Algorithm SHA256).Hash } else { 'MISSING' }
-} | Format-List
-```
+For the previously inspected cached image, run the standalone read-only
+plan, which checks the cached bytes against the reviewed digest and the Stage
+2 sidecar metadata, validates available host capacity and checks WSL tools:
 
-Only when the expected and calculated digest match should the isolated
-provisioner be planned. Replace the two placeholders with the verified
-values (one PowerShell line or backticks for continuation):
+\`\`\`powershell
+cd C:\Users\Orzu\projects\sentinel-ai-platform
+git switch feature/stage53-clean-bootstrap
+git pull --ff-only origin feature/stage53-clean-bootstrap
+$imagePath = 'C:\Sentinel\ImageCache\ubuntu\26.04\20261016\5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5.img'
+$digest = '5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5'
+.\infrastructure\level1\tools\New-SentinelDisposableE2E.ps1 -Mode PLAN -ImagePath $imagePath -ImageSHA256 $digest
+\`\`\`
 
-```powershell
-.\infrastructure\level1\tools\New-SentinelDisposableE2E.ps1 -Mode PLAN `
-  -ImagePath '<verified-Stage-2-cache-path>' `
-  -ImageSHA256 '<reviewed-64-character-sha256>'
-```
+The standalone tool needs no \`config/lab.json\`. Its image sidecar proves
+consistency with Sentinel's prior Stage 2 record but is not a cryptographic
+replacement for separately verifying the signed Canonical checksum file.
+WSL paths are converted by a pure Windows helper to \`/mnt/c/...\` without
+passing unescaped \`C:\...\` through bash. WSL is launched with \`--exec\`,
+so a WSL systemd warning is handled separately from a nonzero helper exit.
+The disposable guest uses a netplan match for Hyper-V's actual Ethernet
+interface instead of guessing the name \`mgmt\`.
 
 After a successful plan and explicit approval for a distinct VM, use
 `-Mode CREATE -Approval CREATE_DISPOSABLE_SENTINEL_E2E_SSH01`.
