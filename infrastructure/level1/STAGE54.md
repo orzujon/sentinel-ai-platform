@@ -1,8 +1,20 @@
 # Stage 5.4 — Fresh VM → Hyper-V KVP → trusted SSH → Ansible
 
-**Status (1 November 2026):** Implemented in `feature/stage54-zero-to-ansible` and CI-tested using synthetic guest KVP pools and Windows offline tests. **A new Stage 5.4 VM has not yet been created or tested live.** The previous `sentinel-e2e-w02` live KVP/SSH pass remains the evidence for the underlying identity flow.
+**Status (1 November 2026):** Stage 5.4 first live attempt provisioned `sentinel-e2e-auto20` (UUID `052fd532-d22e-434b-bef9-d1e3ba20673b`) and reached an SSH listener, but **did not complete unattended KVP/Ansible acceptance**. The guest first-boot KVP script aborted before installing any cloud-tools packages. The VM was recovered manually using provisional diagnostic SSH and exact kernel-matched KVP installation; this **does not count** as a zero-touch pass. Follow-up changes on this draft branch require a **fresh** VM acceptance run. The earlier Stage 5.3 `sentinel-e2e-w02` live KVP/SSH pass remains evidence for the underlying identity flow.
 
 The Stage 5.4 provisioner **never touches** `sentinel-l1-cp01`, `sentinel-l1-w01`, `k8s-cp01`, `k8s-w01`, `sentinel-e2e-w02` or any existing switch. It only creates a fresh, nonexisting `sentinel-e2e-auto20` through `sentinel-e2e-auto29` with a reviewed Ubuntu 26.04 cloud image, two matching-MAC Hyper-V NICs and a new UUID/nonce. It does not install Kubernetes.
+
+## Stage 5.4 live failure and follow-up fixes (1 November 2026)
+
+The first attempt used the original seed network-config (management DHCP DNS). Guest DNS `172.19.208.1` resolved `archive.ubuntu.com` during follow-up diagnostics; the **first-boot cloud-init APT update succeeded**, and `openssh-server` was already installed. The KVP first-boot script reached `FIRSTBOOT_KVP_PACKAGE_PLAN: kernel=7.0.0-38-generic`, its own APT update succeeded, but it emitted only `FIRSTBOOT_KVP_BLOCKED` immediately thereafter, before any KVP package install. `dpkg-query` showed no `linux-cloud-tools*` packages and `hv-kvp-daemon.service` did not exist. Exact signed APT candidate checks and a reviewed 7-package transaction succeeded manually (3 KVP installs, 4 related package upgrades, no removals). Targeted KVP udev activation and daemon startup restored Hyper-V KVP. **The most likely script defect** was `awk ... {print $2; exit}` in a pipeline under `set -euo pipefail`, where `apt-cache` may report SIGPIPE; this has not been conclusively observed at the failed process exit.
+
+Corrections for **future fresh VM seeds**, not retroactive to the existing VM:
+- Safe APT policy collection before parsing candidates, with explicit per-package candidate logging; offline behavioral test using an oversized mock `apt-cache` response under `pipefail`.
+- Guest-side DNS preflight and fatal APT-index failure diagnostics; first-boot Netplan has persistent known-working DNS as added after the failed first deployment.
+- Install signed kernel-matched `linux-cloud-tools` packages, then replay **only** the KVP VMBus device's udev event and check `hv-kvp-daemon.service`.
+- First-boot failure trap reports line/return code without accepting an SSH host key, and the full guarded cleanup PLAN now runs in ephemeral Windows CI.
+
+The fresh success criterion remains **`STAGE54_ZERO_TOUCH_E2E_PASS`**, observed live **without diagnostic or provisional first-contact SSH**. Offline CI cannot guarantee Hyper-V network, APT mirror or guest-device integration on the user's machine. Cleanup and recreation must use separately reviewed, exact UUID-bound disposable controls.
 
 ## Critical architectural change
 
