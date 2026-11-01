@@ -97,28 +97,6 @@ function Assert-CurrentSafety {
             throw "BLOCKED: junction or symlink under proposed deletion scope: $($item.FullName)"
         }
     }
-    $topAllowed = @(
-        'os.vhdx','seed.iso','user-data','meta-data','network-config',
-        'provisioning.json','provisioning-nonce','diagnostic_known_hosts',
-        'trusted_known_hosts','ansible-inventory.ini',
-        'Virtual Machines','Snapshots','Smart Paging','Virtual Hard Disks'
-    )
-    $unexpected = @(Get-ChildItem -LiteralPath $folder -Force | Where-Object {
-        $_.Name -cnotin $topAllowed
-    })
-    if ($unexpected.Count -ne 0) {
-        # Visibility, not trust expansion: report the exact unknown paths
-        # and metadata without reading contents, copying or deleting anything.
-        # Neither PLAN nor REMOVE may proceed until reviewed explicitly.
-        Write-Warning ("CLEANUP_UNRECOGNISED_ENTRIES: count={0}; no deletion performed." -f $unexpected.Count)
-        foreach ($item in $unexpected) {
-            $kind = if ($item.PSIsContainer) { 'directory' } else { 'file' }
-            $bytes = if ($item.PSIsContainer) { 'n/a' } else { [string]$item.Length }
-            Write-Host ("CLEANUP_UNRECOGNISED_ENTRY: type={0}; bytes={1}; attributes={2}; path={3}" -f
-                $kind, $bytes, [string]$item.Attributes, [string]$item.FullName)
-        }
-        throw ("BLOCKED: {0} unrecognised disposable top-level entries; review each path before changing allowlist or deleting anything." -f $unexpected.Count)
-    }
     $manifestFile = Get-Item -LiteralPath $manifestPath -Force
     if ($manifestFile.Length -gt 8192 -or $manifestFile.PSIsContainer) {
         throw 'BLOCKED: manifest is too large or not a regular file'
@@ -148,6 +126,98 @@ function Assert-CurrentSafety {
     }
     if (-not (Test-InFolder ([string]$vm.Path) $folder)) {
         throw 'BLOCKED: Hyper-V VM configuration is outside the disposable directory'
+    }
+    # A New-VM -Path <folder> invocation can create an additional
+    # <folder>\<VM-name>\Virtual Machines configuration subtree.
+    # Its NAME is not enough to own it: bind its exact path and VM UUID
+    # to the live Hyper-V object before admitting it to the removal scope.
+    $nested = Join-Path $folder $name
+    $allowNested = $false
+    if (Test-Path -LiteralPath $nested) {
+        $nestedItem = Get-Item -LiteralPath $nested -Force -ErrorAction Stop
+        if (-not $nestedItem.PSIsContainer -or
+            ($nestedItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'BLOCKED: same-name nested VM entry is not a real directory'
+        }
+        if (-not (Test-InFolder -Candidate ([string]$vm.Path) -Directory $nested)) {
+            Write-Host ("CLEANUP_NESTED_PATH_MISMATCH: nested={0}; hypervPath={1}" -f
+                $nested, [string]$vm.Path)
+            throw 'BLOCKED: nested VM directory is not Hyper-V configuration for the exact UUID'
+        }
+        $nestedAllowlist = @('Virtual Machines','Snapshots','Smart Paging','Virtual Hard Disks')
+        $unexpectedNested = @(Get-ChildItem -LiteralPath $nested -Force -ErrorAction Stop |
+            Where-Object { $_.Name -cnotin $nestedAllowlist -or -not $_.PSIsContainer })
+        if ($unexpectedNested.Count -ne 0) {
+            foreach ($entry in $unexpectedNested) {
+                Write-Host ("CLEANUP_UNRECOGNISED_NESTED_ENTRY: {0}" -f $entry.FullName)
+            }
+            throw 'BLOCKED: nested Hyper-V configuration contains unknown top-level entries'
+        }
+        # Require a single VM configuration file named by the independently
+        # validated Hyper-V ID; do not trust name-only folder matches.
+        $configDir = Join-Path $nested 'Virtual Machines'
+        if (-not (Test-Path -LiteralPath $configDir -PathType Container)) {
+            throw 'BLOCKED: nested Hyper-V configuration folder missing Virtual Machines'
+        }
+        $configFiles = @(Get-ChildItem -LiteralPath $configDir -Force -File -Filter '*.vmcx' -ErrorAction Stop)
+        if ($configFiles.Count -ne 1 -or
+            $configFiles[0].BaseName -ine ([string]$ExpectedVMId)) {
+            Write-Host ("CLEANUP_CONFIG_FILE_CANDIDATES: {0}" -f
+                (($configFiles | Select-Object -ExpandProperty Name) -join ','))
+            throw 'BLOCKED: nested Hyper-V configuration VM UUID .vmcx does not match'
+        }
+        # Check other files under the config folder are Hyper-V-owned by
+        # the same VM UUID. Foreign files block; no wildcard allowance.
+        $configEntries = @(Get-ChildItem -LiteralPath $configDir -Force -ErrorAction Stop)
+        $validConfigNames = @(
+            ([string]$ExpectedVMId + '.vmcx'),
+            ([string]$ExpectedVMId + '.vmrs'),
+            ([string]$ExpectedVMId + '.vmgs')
+        )
+        $unownedConfig = @($configEntries | Where-Object {
+            $_.PSIsContainer -or $_.Name -notin $validConfigNames
+        })
+        if ($unownedConfig.Count -ne 0) {
+            foreach ($entry in $unownedConfig) {
+                Write-Host ("CLEANUP_UNOWNED_CONFIG_ENTRY: {0}" -f $entry.FullName)
+            }
+            throw 'BLOCKED: VM configuration includes unknown or foreign files'
+        }
+        # The disk is located at the outer folder, and this lab has no
+        # checkpoints. Therefore other nested Hyper-V folders must be empty.
+        foreach ($childName in @('Snapshots','Smart Paging','Virtual Hard Disks')) {
+            $childPath = Join-Path $nested $childName
+            if (Test-Path -LiteralPath $childPath) {
+                if (-not (Test-Path -LiteralPath $childPath -PathType Container) -or
+                    @(Get-ChildItem -LiteralPath $childPath -Force -ErrorAction Stop).Count -ne 0) {
+                    throw "BLOCKED: nested Hyper-V $childName directory is not empty/valid"
+                }
+            }
+        }
+        $allowNested = $true
+        Write-Host ("CLEANUP_NESTED_HYPERV_CONFIG_VERIFIED: directory={0}; vmId={1}" -f
+            $nested, [string]$vm.Id)
+    }
+    # Compare exact filenames, not a wildcard. The one extra directory is
+    # allowed only AFTER the live Hyper-V path and UUID-backed vmcx validation.
+    $topAllowed = @(
+        'os.vhdx','seed.iso','user-data','meta-data','network-config',
+        'provisioning.json','provisioning-nonce','diagnostic_known_hosts',
+        'trusted_known_hosts','ansible-inventory.ini',
+        'Virtual Machines','Snapshots','Smart Paging','Virtual Hard Disks'
+    )
+    if ($allowNested) { $topAllowed += $name }
+    $unexpected = @(Get-ChildItem -LiteralPath $folder -Force -ErrorAction Stop |
+        Where-Object { $_.Name -cnotin $topAllowed })
+    if ($unexpected.Count -ne 0) {
+        Write-Warning ("CLEANUP_UNRECOGNISED_ENTRIES: count={0}; no deletion performed." -f $unexpected.Count)
+        foreach ($item in $unexpected) {
+            $kind = if ($item.PSIsContainer) { 'directory' } else { 'file' }
+            $bytes = if ($item.PSIsContainer) { 'n/a' } else { [string]$item.Length }
+            Write-Host ("CLEANUP_UNRECOGNISED_ENTRY: type={0}; bytes={1}; attributes={2}; path={3}" -f
+                $kind, $bytes, [string]$item.Attributes, [string]$item.FullName)
+        }
+        throw ("BLOCKED: {0} unrecognised disposable top-level entries; review each path before changing allowlist or deleting anything." -f $unexpected.Count)
     }
     $disks = @(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop)
     if ($disks.Count -ne 1 -or
