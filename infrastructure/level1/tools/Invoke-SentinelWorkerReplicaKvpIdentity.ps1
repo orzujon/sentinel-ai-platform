@@ -123,13 +123,15 @@ if (-not (Test-Path -LiteralPath $ssh -PathType Leaf) -or
 }
 
 $python = Get-Content -LiteralPath $source -Raw -Encoding UTF8
-$encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($python))
 $guestMode = if ($Mode -eq 'PUBLISH') { 'publish' } else { 'plan' }
-$guestApproval = if ($Mode -eq 'PUBLISH') {
-    ' --approval PUBLISH_DISPOSABLE_SENTINEL_W02_HOST_PUBLIC_KEY'
-} else { '' }
-# Decode directly into Python stdin; script and keys never land in a VM temp file.
-$remote = "printf '%s' '$encoded' | base64 -d | sudo -n python3 - --mode $guestMode$guestApproval"
+# No remote shell quotes, embedded base64 or long command argument.
+# OpenSSH forwards its standard input to Python's standard input.
+# This avoids Windows PowerShell / Git SSH argument-quoting failures.
+$remote = if ($Mode -eq 'PUBLISH') {
+    'sudo -n python3 - --mode publish --approval PUBLISH_DISPOSABLE_SENTINEL_W02_HOST_PUBLIC_KEY'
+} else {
+    'sudo -n python3 - --mode plan'
+}
 $sshArgs = @(
     '-i', $identity,
     '-o', 'IdentitiesOnly=yes',
@@ -141,8 +143,11 @@ $sshArgs = @(
     "orzu@$ip",
     $remote
 )
+# PowerShell 5.1 defaults to an ASCII native-pipeline encoding. Explicit UTF-8
+# preserves source bytes and supports both Windows PowerShell and PowerShell 7.
+$OutputEncoding = [Text.UTF8Encoding]::new($false)
 Write-Host "SENTINEL_KVP_PUBLIC_KEY_$($Mode): VM=$name; trust=DIAGNOSTIC_ONLY"
-& $ssh @sshArgs
+$python | & $ssh @sshArgs
 if ($LASTEXITCODE -ne 0) {
     throw "BLOCKED: guest KVP public-key $Mode failed; exit=$LASTEXITCODE; do not blindly retry"
 }
