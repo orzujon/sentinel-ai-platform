@@ -590,3 +590,29 @@ the trusted Hyper-V host boundary, not against a compromised guest or host.
 **Partial failures block**. A pre-existing different trust key or an
 unexpected ACL is never overwritten or silently repaired. Stop and inspect
 rather than deleting the protected file or suppressing SSH key checking.
+
+### Stage 5.3.4 / 5.3.5 — Live disposable SSH acceptance (2026-11-01)
+
+**PASS, as reported from the Windows Hyper-V host** for the disposable
+`sentinel-e2e-w02` VM (10.78.0.12).
+
+- `PLAN` rechecked the live KVP record, VM ID, manifest nonce and the
+  network-observed SSH ED25519 public host key: `SENTINEL_SSH_TRUST_PLAN_READY`.
+  The dedicated trust store was initially `ABSENT`.
+- Approval-gated `REGISTER` reported
+  `SENTINEL_SSH_HOST_TRUST_REGISTERED` and created the dedicated protected
+  `trusted_known_hosts` file without modifying global or diagnostic trust.
+- `ACCEPT` reverified the evidence, reported trust store `MATCH`, then
+  used the dedicated KVP-pinned key to authenticate with strict SSH host
+  verification and execute the read-only `hostname` command:
+  `SENTINEL_SSH_PINNED_AUTHENTICATION_PASS`.
+- Observed SSH host-key fingerprint:
+  `SHA256:2Dwpwi9jYpHwGfE/SQ0VGwRWcvt3OXyPqjkIkuZt7w0`.
+
+This confirms the complete **disposable VM** identity chain:
+provisioner-created VM identity -> guest KVP publication -> Hyper-V KVP
+collection -> network key comparison -> protected local host-key
+registration -> actual authenticated SSH. It is **not** a blanket
+attestation of guest OS integrity or a claim that this is already
+integrated into the generic Stage 3 provisioning pipeline. Existing
+Kubernetes guests were never targets of these acceptance commands.
