@@ -15,10 +15,10 @@ if (Test-Path -LiteralPath $root) {
     throw 'BLOCKED: test fixture root already exists on CI runner; refuse adoption'
 }
 $folder = Join-Path $root $vmName
-$script:config = Join-Path $folder $vmName
-$script:osDisk = Join-Path $folder 'os.vhdx'
-$script:seed = Join-Path $folder 'seed.iso'
-$vmConfig = Join-Path $script:config 'Virtual Machines'
+$global:config = Join-Path $folder $vmName
+$global:osDisk = Join-Path $folder 'os.vhdx'
+$global:seed = Join-Path $folder 'seed.iso'
+$vmConfig = Join-Path $global:config 'Virtual Machines'
 $runtime = Join-Path $vmConfig $vmId.ToString('D').ToUpperInvariant()
 [void][IO.Directory]::CreateDirectory($runtime)
 foreach ($extension in @('.vmcx','.vmgs','.vmrs')) {
@@ -27,8 +27,8 @@ foreach ($extension in @('.vmcx','.vmgs','.vmrs')) {
         [byte[]](1,2,3)
     )
 }
-[IO.File]::WriteAllBytes($script:osDisk,[byte[]](1,2,3))
-[IO.File]::WriteAllBytes($script:seed,[byte[]](1,2,3))
+[IO.File]::WriteAllBytes($global:osDisk,[byte[]](1,2,3))
+[IO.File]::WriteAllBytes($global:seed,[byte[]](1,2,3))
 $manifest = [ordered]@{
     schema=1;purpose='disposable-worker-replica-e2e';
     node=$vmName;vmId=[string]$vmId;privateIP='10.78.0.12';
@@ -40,26 +40,28 @@ $manifest = [ordered]@{
     ($manifest | ConvertTo-Json -Compress),
     [Text.UTF8Encoding]::new($false)
 )
-$script:fakeVM = [pscustomobject]@{
-    Name=$vmName; Id=$vmId; State='Off'; Path=$script:config
+$global:fakeVM = [pscustomobject]@{
+    Name=$vmName; Id=$vmId; State='Off'; Path=$global:config
 }
 # The following functions shadow real Hyper-V cmdlets in the child script.
+# Fixture values are global only inside this disposable GitHub Actions process,
+# because the tested cleanup script has its own PowerShell script scope.
 function Get-VM {
     [CmdletBinding()]
     param([string]$Name)
-    if (-not $PSBoundParameters.ContainsKey('Name') -or $Name -ceq $script:fakeVM.Name) {
-        return $script:fakeVM
+    if (-not $PSBoundParameters.ContainsKey('Name') -or $Name -ceq $global:fakeVM.Name) {
+        return $global:fakeVM
     }
 }
 function Get-VMHardDiskDrive {
     [CmdletBinding()]
     param($VM)
-    return [pscustomobject]@{Path=$script:osDisk}
+    return [pscustomobject]@{Path=$global:osDisk}
 }
 function Get-VMDvdDrive {
     [CmdletBinding()]
     param($VM)
-    return [pscustomobject]@{Path=$script:seed}
+    return [pscustomobject]@{Path=$global:seed}
 }
 function Get-VMSnapshot {
     [CmdletBinding()]
