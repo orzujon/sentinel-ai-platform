@@ -209,3 +209,32 @@ to the full bootstrap orchestrator. Stage 5.3's `guest-first-trust` remains
 **ready: false** pending verified secure provisioning-channel collection and
 full integration. Never treat two copies of the same network-provided key as
 independent attestation.
+
+### Hyper-V Linux guest management channel discovery (read-only)
+
+Microsoft documents Hyper-V **Data Exchange / KVP**, which moves small
+guest-provided key/value messages over VMbus independently of the guest IP
+network. Linux requires the `hv_kvp_daemon` integration service. Unlike
+PowerShell Direct, which requires a **Windows guest**, Hyper-V KVP can work
+with Ubuntu guests. This does **not** by itself make guest-published strings
+cryptographically authenticated or establish SSH trust. We must bind evidence
+to the new provisioned VM ID and verify its lifecycle and trusted origin.
+
+Run the host-only probe **on the existing working VMs**, without changing
+their configuration:
+
+```powershell
+cd C:\Users\Orzu\projects\sentinel-ai-platform
+.\infrastructure\level1\tools\Inspect-SentinelHyperVKvp.ps1
+```
+
+The probe checks VM identity, Data Exchange enabled status and presence of
+the reserved `Sentinel.SSHHostKey.Ed25519` guest KVP item. No new items
+have yet been added to the guests, so `publishedKeyPresent: False` is
+expected. A missing KVP service blocks this channel rather than falling
+back to unauthenticated SSH. Do **not** set Step 40 `ready: true` yet:
+we still need an approved guest evidence publisher and a strong
+provisioning-time VM identity/freshness binding, followed by offline
+comparison and private trusted-host registration.
+
+Reference: https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/integration-services-data-exchange
