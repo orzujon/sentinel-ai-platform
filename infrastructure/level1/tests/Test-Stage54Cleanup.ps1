@@ -75,8 +75,8 @@ foreach ($forbidden in @('Stop-VM -TurnOff','Stop-VM -Force','Remove-VMSwitch','
 }
 # Unknown entries must be listed for review, NEVER deleted or adopted.
 # Maintain the original explicit top-level allowlist; no wildcard additions.
-if (-not $source.Contains("if ($unexpected.Count -ne 0)") -or
-    -not $source.Contains("foreach ($item in $unexpected)") -or
+if (-not $source.Contains('if ($unexpected.Count -ne 0)') -or
+    -not $source.Contains('foreach ($item in $unexpected)') -or
     $source.Contains("'*'")) {
     throw 'BLOCKED: cleanup unexpectedly broadens the deletion allowlist'
 }
