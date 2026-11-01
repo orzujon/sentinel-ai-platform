@@ -57,6 +57,15 @@ foreach ($required in @(
     'Remove-VM -VM',
     'Remove-Item -LiteralPath $folder',
     'Stop-VM -VM $again -Shutdown',
+    'CLEANUP_NESTED_HYPERV_CONFIG_VERIFIED',
+    'CLEANUP_NESTED_PATH_MISMATCH',
+    'CLEANUP_CONFIG_FILE_CANDIDATES',
+    'CLEANUP_UNRECOGNISED_NESTED_ENTRY',
+    'CLEANUP_UNOWNED_CONFIG_ENTRY',
+    '$configFiles[0].BaseName -ine ([string]$ExpectedVMId)',
+    "Get-ChildItem -LiteralPath $configDir",
+    'Test-InFolder -Candidate ([string]$vm.Path) -Directory $nested',
+    'Get-VMSnapshot -VM $vm',
     'CLEANUP_UNRECOGNISED_ENTRY:',
     'CLEANUP_UNRECOGNISED_ENTRIES:',
     'no deletion performed',
@@ -72,6 +81,18 @@ foreach ($forbidden in @('Stop-VM -TurnOff','Stop-VM -Force','Remove-VMSwitch','
     if ($source.Contains($forbidden)) {
         throw "BLOCKED: cleanup has unsafe operation or unexpected external command: $forbidden"
     }
+}
+# Nested same-name folders are NOT trusted just because they have a familiar name.
+# The live Hyper-V VM.Path and UUID-named vmcx must both match, and child
+# folders must not contain foreign VM disks, checkpoints or unknown files.
+if (-not $source.Contains('if ($allowNested) { $topAllowed += $name }') -or
+    -not $source.Contains('if (-not (Test-InFolder -Candidate ([string]$vm.Path) -Directory $nested))') -or
+    -not $source.Contains('$configFiles.Count -ne 1') -or
+    -not $source.Contains("if ($unownedConfig.Count -ne 0)") -or
+    -not $source.Contains("if ($unexpectedNested.Count -ne 0)") -or
+    -not $source.Contains('Snapshots') -or
+    -not $source.Contains("if ($unexpected.Count -ne 0)")) {
+    throw 'BLOCKED: same-name nested Hyper-V configuration must retain VM UUID and strict file ownership checks'
 }
 # Unknown entries must be listed for review, NEVER deleted or adopted.
 # Maintain the original explicit top-level allowlist; no wildcard additions.
