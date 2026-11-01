@@ -63,7 +63,7 @@ foreach ($required in @(
     'CLEANUP_UNRECOGNISED_NESTED_ENTRY',
     'CLEANUP_UNOWNED_CONFIG_ENTRY',
     '$configFiles[0].BaseName -ine ([string]$ExpectedVMId)',
-    "Get-ChildItem -LiteralPath $configDir",
+    'Get-ChildItem -LiteralPath $configDir',
     'Test-InFolder -Candidate ([string]$vm.Path) -Directory $nested',
     'Get-VMSnapshot -VM $vm',
     'CLEANUP_UNRECOGNISED_ENTRY:',
