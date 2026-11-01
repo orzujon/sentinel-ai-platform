@@ -137,6 +137,9 @@ jobs:
       - name: Validate KVP host identity publication and VM-bound collector
         shell: powershell
         run: .\infrastructure\level1\tests\Test-WorkerReplicaKvpIdentity.ps1
+      - name: Validate KVP-pinned SSH trust registration and Windows ACL protection
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-WorkerReplicaSshTrust.ps1
       - name: Verify worker-shaped two-NIC disposable VM and safety contracts offline
         shell: powershell
         run: .\infrastructure\level1\tests\Test-WorkerReplicaContract.ps1
