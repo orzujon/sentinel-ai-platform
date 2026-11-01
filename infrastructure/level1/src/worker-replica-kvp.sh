@@ -112,6 +112,29 @@ installed="$(dpkg-query -W -f='${Version}' linux-cloud-tools-common)"
 if [[ "$installed" != '7.0.0-42.42' ]]; then
   echo "BLOCKED: unexpected KVP version $installed" >&2; exit 2
 fi
+# The VMBus device was enumerated at first boot before the udev rule existed.
+# Reload and replay only this KVP device event. Never retrigger all devices.
+device='/sys/devices/virtual/misc/vmbus!hv_kvp'
+rule='/usr/lib/udev/rules.d/60-hv-kvp-daemon.rules'
+unit='sys-devices-virtual-misc-vmbus\x21hv_kvp.device'
+if [[ ! -e "$device" || ! -c /dev/vmbus/hv_kvp || ! -f "$rule" ]]; then
+  echo 'BLOCKED: required KVP device, char node or package udev rule absent' >&2; exit 2
+fi
+if ! grep -Fq 'TAG+="systemd"' "$rule" ||
+   ! grep -Fq 'SYSTEMD_WANTS' "$rule"; then
+  echo 'BLOCKED: unexpected packaged KVP udev rule' >&2; exit 2
+fi
+echo '=== REPLAYING ONLY LATE-INSTALLED KVP UDEV RULE ==='
+udevadm trigger --dry-run --action=add --verbose "$device"
+udevadm control --reload
+udevadm trigger --action=add "$device"
+udevadm settle --timeout=20
+if ! udevadm info --query=property --path="$device" | grep -Eq '^TAGS=.*:systemd:'; then
+  echo 'BLOCKED: KVP device missing systemd udev tag after retrigger' >&2; exit 2
+fi
+if [[ "$(systemctl show "$unit" -p ActiveState --value)" != active ]]; then
+  echo 'BLOCKED: systemd did not activate exact KVP VMBus device unit' >&2; exit 2
+fi
 systemctl enable --now hv-kvp-daemon.service
 systemctl is-active --quiet hv-kvp-daemon.service
-echo 'KVP_REPLICA_INSTALL_COMPLETE: 7.0.0-42.42 active'
+echo 'KVP_GUEST_DAEMON_ACTIVE_HOST_UNVERIFIED: verify Hyper-V integration independently'
