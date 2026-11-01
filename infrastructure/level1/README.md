@@ -174,3 +174,38 @@ verified. Comparing two network-fetched keys proves nothing about server
 identity. Only after a valid match and separate reviewed approval should an
 integrator write trusted known_hosts records. The **currently running lab
 must not have its existing trusted records changed** during this development.
+
+
+### Stage 5.3 — First-boot trust store registration (new, not yet integrated)
+
+`infrastructure/ansible/register_first_boot_hostkeys.py` now prepares a
+**new private dedicated** `firstboot-known_hosts` file for the two newly
+provisioned sandbox guests, after comparing both nodes' independently attested
+console public keys against observed SSH host keys. It requires explicit
+approval, prohibits identical host identities, checks that the private state
+directory is restricted, and refuses to replace an existing trust file.
+
+Run only in an approved, fresh disposable environment with already-reviewed
+independent console evidence, *not on the running two-node Kubernetes lab*.
+The operator must independently authenticate the origin of both console files:
+file-path separation alone does not prove independence.
+
+```bash
+python3 infrastructure/ansible/register_first_boot_hostkeys.py \\
+  --cp-attested /private/console/cp.pub \\
+  --cp-observed /private/network/cp.pub \\
+  --worker-attested /private/console/worker.pub \\
+  --worker-observed /private/network/worker.pub \\
+  --private-root /private/sentinel-new-deployment \\
+  --approval REGISTER_NEW_SENTINEL_HOST_IDENTITIES \\
+  --attestation-reviewed
+```
+
+This example requires the target `--private-root` directory to exist with
+permissions `0700` and creates only a new `0600` known-hosts file. It does
+not automatically acquire independent VM host-key evidence, does not amend
+`~/.ssh/known_hosts`, does not perform SSH or Ansible, and is not yet linked
+to the full bootstrap orchestrator. Stage 5.3's `guest-first-trust` remains
+**ready: false** pending verified secure provisioning-channel collection and
+full integration. Never treat two copies of the same network-provided key as
+independent attestation.
