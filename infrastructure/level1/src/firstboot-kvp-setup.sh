@@ -26,10 +26,27 @@ for package in "${packages[@]}"; do
   [[ -n "$candidate" && "$candidate" != "(none)" ]] ||
     { echo "BLOCKED: missing signed Ubuntu package candidate for $package" >&2; exit 2; }
 done
-apt-get install -y --no-install-recommends "${packages[@]}"
+apt-get install -y --no-install-recommends --no-remove "${packages[@]}"
+# Previous Stage 5.3 live acceptance required replaying the specific KVP
+# udev add event: the VMBus device appeared before the package rule existed.
+# Never retrigger other devices and never bypass the host-side KVP attestation.
+device='/sys/devices/virtual/misc/vmbus!hv_kvp'
+rule='/usr/lib/udev/rules.d/60-hv-kvp-daemon.rules'
+unit='sys-devices-virtual-misc-vmbus\\x21hv_kvp.device'
+[[ -e "$device" && -c /dev/vmbus/hv_kvp && -f "$rule" ]] ||
+  { echo 'BLOCKED: KVP device or packaged udev rule absent' >&2; exit 2; }
+grep -Fq 'TAG+="systemd"' "$rule" && grep -Fq 'SYSTEMD_WANTS' "$rule" ||
+  { echo 'BLOCKED: unexpected KVP udev rule' >&2; exit 2; }
+udevadm trigger --dry-run --action=add --verbose "$device"
+udevadm control --reload
+udevadm trigger --action=add "$device"
+udevadm settle --timeout=20
+udevadm info --query=property --path="$device" | grep -Eq '^TAGS=.*:systemd:' ||
+  { echo 'BLOCKED: KVP udev systemd tag absent' >&2; exit 2; }
+[[ "$(systemctl show "$unit" -p ActiveState --value)" == active ]] ||
+  { echo 'BLOCKED: KVP device unit inactive' >&2; exit 2; }
 systemctl enable --now hv-kvp-daemon.service
 systemctl is-active --quiet hv-kvp-daemon.service
-[[ -c /dev/vmbus/hv_kvp ]] || { echo 'BLOCKED: KVP device absent' >&2; exit 2; }
 pool_count=0
 for pool in /var/lib/hyperv/.kvp_pool_1 /var/opt/hyperv/.kvp_pool_1; do
   if [[ -f "$pool" && ! -L "$pool" ]]; then (( pool_count+=1 )); fi
