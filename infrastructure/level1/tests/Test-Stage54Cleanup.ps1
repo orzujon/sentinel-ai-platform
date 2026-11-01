@@ -80,6 +80,40 @@ foreach ($forbidden in @('Stop-VM -TurnOff','Stop-VM -Force','Remove-VMSwitch','
         throw "BLOCKED: cleanup has unsafe operation or unexpected external command: $forbidden"
     }
 }
+# Regression for the actual 2026-11-01 runtime failure: the real cleanup
+# PLAN referenced $configDir before assignment even though static tests passed.
+# Locate the assignment and consumer as parsed AST nodes, not a string
+# appearing in a comment or a function that never runs.
+$parseTokens = $null
+$parseErrors = $null
+$cleanupAst = [Management.Automation.Language.Parser]::ParseFile(
+    $script, [ref]$parseTokens, [ref]$parseErrors
+)
+if ($parseErrors.Count -gt 0) {
+    throw 'BLOCKED: cleanup AST is not parseable for variable-flow regression'
+}
+$assignments = @($cleanupAst.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+    $node.Left.Extent.Text -ceq '$configDir' -and
+    $node.Right.Extent.Text -match 'Join-Path\s+\$nested\s+'
+}, $true))
+$calls = @($cleanupAst.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.CommandAst] -and
+    $node.GetCommandName() -ceq 'Assert-SentinelHyperVConfigLayout'
+}, $true))
+if ($assignments.Count -ne 1 -or $calls.Count -ne 1 -or
+    $assignments[0].Extent.StartOffset -ge $calls[0].Extent.StartOffset) {
+    throw 'BLOCKED: actual PLAN configDir must be initialised exactly once before Hyper-V config layout validator'
+}
+$preflight = $source.IndexOf("if (-not (Test-Path -LiteralPath " + '$configDir' + " -PathType Container))")
+if ($preflight -le $assignments[0].Extent.StartOffset -or
+    $preflight -ge $calls[0].Extent.StartOffset) {
+    throw 'BLOCKED: actual PLAN configDir existence check must happen between assignment and validator'
+}
+Write-Host 'PASS: configDir assignment and directory preflight precede real cleanup PLAN validator invocation'
+
 # Nested same-name folders are NOT trusted just because they have a familiar name.
 # The live Hyper-V VM.Path and UUID-named vmcx must both match, and child
 # folders must not contain foreign VM disks, checkpoints or unknown files.
