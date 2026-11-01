@@ -67,6 +67,8 @@ jobs:
         run: python -m unittest discover -s infrastructure/level1/tests -p 'test_worker_replica_kvp_simulation.py' -v
       - name: Test matching-kernel KVP recovery simulation and fail-closed limits
         run: python -m unittest discover -s infrastructure/level1/tests -p 'test_worker_replica_kvp_kernel_recovery.py' -v
+      - name: Test disposable KVP guest-to-host SSH public key publisher
+        run: python -m unittest discover -s infrastructure/level1/tests -p 'test_worker_replica_kvp_publisher.py' -v
       - name: Execute Level 1 static package tests
         run: python -m unittest discover -s infrastructure/level1/tests -p 'test_*.py' -v
       - name: Demonstrate read-only sample plan
@@ -132,6 +134,9 @@ jobs:
       - name: Validate guarded worker replica KVP plan/apply approval and isolation
         shell: powershell
         run: .\infrastructure\level1\tests\Test-WorkerReplicaKvp.ps1
+      - name: Validate KVP host identity publication and VM-bound collector
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-WorkerReplicaKvpIdentity.ps1
       - name: Verify worker-shaped two-NIC disposable VM and safety contracts offline
         shell: powershell
         run: .\infrastructure\level1\tests\Test-WorkerReplicaContract.ps1
