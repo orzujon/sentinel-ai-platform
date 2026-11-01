@@ -389,26 +389,34 @@ Hyper-V Default Switch, in `C:\Sentinel\E2E-Disposable`. The seed carries
 an independent per-VM nonce and configures an SSH user and version-pinned
 Ubuntu KVP daemon package. No automatic cleanup or destructive rollback.
 
-First discover the exact cached approved image path and its SHA256 on your
-Windows machine; **do not assume a hash**. Example:
+Stage 2 stores an approved Ubuntu image under a SHA256 **digest filename**,
+not the original upstream name. Confirm its path and matching digest with
+the local private Stage 2 configuration (do not put private settings in git):
 
 ```powershell
-Get-ChildItem C:\Sentinel\ImageCache -Recurse -File -Filter ubuntu-26.04-server-cloudimg-amd64.img |
-  Select-Object FullName,@{N='SHA256';E={(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash}}
+$config = Get-Content .\infrastructure\level1\config\lab.json -Raw | ConvertFrom-Json
+$digest = [string]$config.image.expectedSha256
+$image = Join-Path $config.paths.imageCache ("ubuntu\26.04\$($config.image.buildId)\$($digest.ToLowerInvariant()).img")
+[pscustomobject]@{
+  ImagePath = $image
+  Exists = Test-Path -LiteralPath $image -PathType Leaf
+  ExpectedSHA256 = $digest
+  ActualSHA256 = if (Test-Path -LiteralPath $image -PathType Leaf) { (Get-FileHash -LiteralPath $image -Algorithm SHA256).Hash } else { 'MISSING' }
+} | Format-List
 ```
 
-Then review and plan with the actual approved hash before authorising creation:
+Only when the expected and calculated digest match should the isolated
+provisioner be planned. Replace the two placeholders with the verified
+values (one PowerShell line or backticks for continuation):
 
 ```powershell
-.\infrastructure\level1\tools\New-SentinelDisposableE2E.ps1 -Mode PLAN \\
-  -ImagePath 'C:\Sentinel\ImageCache\<approved-path>\ubuntu-26.04-server-cloudimg-amd64.img' \\
+.\infrastructure\level1\tools\New-SentinelDisposableE2E.ps1 -Mode PLAN `
+  -ImagePath '<verified-Stage-2-cache-path>' `
   -ImageSHA256 '<reviewed-64-character-sha256>'
 ```
 
-The above multiline command illustrates parameters, not literal PowerShell
-line continuation; supply the parameters on one line or use PowerShell
-backticks. After a successful plan and explicit approval for a distinct
-VM, use `-Mode CREATE -Approval CREATE_DISPOSABLE_SENTINEL_E2E_SSH01`.
+After a successful plan and explicit approval for a distinct VM, use
+`-Mode CREATE -Approval CREATE_DISPOSABLE_SENTINEL_E2E_SSH01`.
 It prompts for exact confirmation. A partial failure leaves artifacts for
 manual inspection and never deletes or adopts resources. **Creating this VM
 is not a full SSH/KVP end-to-end PASS.** We still need verified Hyper-V KVP
