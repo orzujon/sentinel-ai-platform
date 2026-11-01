@@ -485,3 +485,48 @@ guest-to-host SSH connectivity (host identity remains untrusted until
 independent attestation); correct DNS resolution and accessible repositories;
 `cloud-init status --long` showing done; only then separate KVP install
 and out-of-band VM-ID/nonce-bound SSH host-key verification.
+
+
+### Stage 5.3.3 — Disposable guest SSH PUBLIC host-key publication through KVP
+
+**Lab prerequisite (1 November 2026):** The disposable Ubuntu VM
+`sentinel-e2e-w02` now runs a stable kernel-matched KVP daemon, and
+Windows reports its Key-Value Pair Exchange integration service as `OK`.
+That confirms the transport, **not yet** a published SSH identity record.
+
+The new tool `Invoke-SentinelWorkerReplicaKvpIdentity.ps1` supports:
+
+- `PLAN`: read-only guest-side verification of exact disposable identity,
+  Ubuntu SSH **public** host key, cloud-init provisioning nonce, KVP daemon
+  state, and exactly one guest-to-host KVP pool.
+- `PUBLISH`: requires an explicit approval and appends one fixed-size record
+  to the Linux daemon's guest-to-host `.kvp_pool_1` under an advisory file
+  lock. It is idempotent for an identical record, rejects replacement or
+  duplicates, and never transfers the VM's SSH private host key.
+- `VERIFY`: **host-only** read of the exact Hyper-V VM's
+  `Msvm_KvpExchangeComponent.GuestExchangeItems`, checks the VM UUID and
+  independently stored provisioner nonce, then compares the KVP public
+  key with a fresh, non-trusting network `ssh-keyscan` observation.
+  The result is evidence only; no `known_hosts` changes are made.
+
+Run from Administrator PowerShell on the Windows Hyper-V host:
+
+```powershell
+cd C:\Users\Orzu\projects\sentinel-ai-platform
+git switch feature/stage53-clean-bootstrap
+git pull --ff-only origin feature/stage53-clean-bootstrap
+.\infrastructure\level1\tools\Invoke-SentinelWorkerReplicaKvpIdentity.ps1 -Mode PLAN
+# Only after reviewing the PLAN output:
+.\infrastructure\level1\tools\Invoke-SentinelWorkerReplicaKvpIdentity.ps1 -Mode PUBLISH -Approval PUBLISH_DISPOSABLE_SENTINEL_W02_HOST_PUBLIC_KEY
+.\infrastructure\level1\tools\Invoke-SentinelWorkerReplicaKvpIdentity.ps1 -Mode VERIFY
+```
+
+Expected marker: `SENTINEL_KVP_SSH_IDENTITY_EVIDENCE_MATCH`, with
+`trusted=false`. The nonce binds the guest's statement to the correct
+provisioning record, **not** proof that the guest is uncompromised.
+SSH administration during this disposable test still relies on provisional
+diagnostic host-key trust. The VM public host key, not its private key, is
+published. Do not promote the diagnostic `known_hosts` file to production.
+Trusted key registration is a separate reviewed stage.
+
+Source: https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/integration-services-data-exchange
