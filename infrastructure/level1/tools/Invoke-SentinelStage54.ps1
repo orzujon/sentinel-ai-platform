@@ -65,11 +65,13 @@ function Assert-AnsibleControllerReady {
         throw 'BLOCKED: Ansible command unavailable in controller WSL Ubuntu-26.04'
     }
 }
-# Check the WSL Ansible controller BEFORE any disposable VM CREATE.
+# First check that previous disposable lab VMs have been cleaned up.
+# This is read-only and reports the exact blocked names before any new work.
+& $create -Mode PLAN -Slot $Slot -ImagePath $ImagePath -ImageSHA256 $ImageSHA256
+# Then preflight Ansible before any fresh VM creation or trust-store write.
 Assert-AnsibleControllerReady
 if ($Mode -eq 'PLAN') {
-    & $create -Mode PLAN -Slot $Slot -ImagePath $ImagePath -ImageSHA256 $ImageSHA256
-    Write-Host 'STAGE54_ORCHESTRATOR_PLAN_READY: no VM or SSH trust change.'
+    Write-Host 'STAGE54_ORCHESTRATOR_PLAN_READY: cleanup, image, SSH login keys and WSL Ansible controller validated; no mutations.'
     return
 }
 # Explicit operator approval is split into two scoped sub-step authorizations.
