@@ -20,5 +20,5 @@ function Require-Blocked([string]$path) {
     }
 }
 Require-Blocked '\\example\share\not-local.img'
-Require-Blocked 'C:\Sentinel\safe\bad' + "`n" + 'path'
+Require-Blocked ('C:\Sentinel\safe\bad' + "`n" + 'path')
 Write-Host 'PASS: Stage 5.3 WSL path conversion produces valid /mnt/c paths without invoking bash'
