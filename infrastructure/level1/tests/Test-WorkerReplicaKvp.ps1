@@ -45,7 +45,14 @@ foreach ($needed in @(
     'apt-get -s',
     'systemctl enable --now hv-kvp-daemon.service',
     'KVP_REPLICA_PLAN_READY',
-    'KVP_REPLICA_INSTALL_COMPLETE',
+    'KVP_GUEST_DAEMON_ACTIVE_HOST_UNVERIFIED',
+    '60-hv-kvp-daemon.rules',
+    'udevadm control --reload',
+    'udevadm trigger --action=add',
+    'udevadm settle --timeout=20',
+    'sys-devices-virtual-misc-vmbus',
+    'TAGS=.*:systemd:',
+    'systemctl show',
     '/etc/kubernetes/admin.conf'
 )) {
     if (-not $linux.Contains($needed)) {
