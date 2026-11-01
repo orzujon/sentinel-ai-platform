@@ -426,3 +426,62 @@ is not a full SSH/KVP end-to-end PASS.** We still need verified Hyper-V KVP
 interoperability, correctly bound fresh evidence collection, and network SSH
 identity checks. Do not use the older Stage 3 `infra-provision` to perform
 this acceptance; its two pinned names are occupied by the working lab.
+
+
+### Stage 5.3 — Disposable worker replica, production-shaped networking (preferred)
+
+The first disposable E2E VM (`sentinel-e2e-ssh01`) uses a **single** Default
+Switch NIC, unlike the deployed Stage 3 two-NIC worker. Its live test
+identified a DNS failure: DHCP supplied Default Switch gateway
+`172.19.208.1` as DNS, UDP lookups there timed out, while `1.1.1.1`
+answered. First-boot APT therefore failed and Hyper-V KVP never installed.
+The failure is preserved as an acceptance finding; do not destroy the VM
+automatically or reinterpret it as an SSH/KVP success.
+
+Use `New-SentinelWorkerReplicaE2E.ps1` to test the REAL Stage 3 network
+startup topology without installing Kubernetes. The small, distinct VM
+`sentinel-e2e-w02` has 2 GiB startup RAM, 24 GiB virtual disk, 2 CPUs, two
+stable-MAC NICs, existing Default Switch with DHCP management, existing
+internal Sentinel-L1 switch with static `10.78.0.12/24`, MAC-based
+cloud-init matching, Ubuntu 26.04, the Stage 3 SSH user, growpart/resize.
+It does not change `sentinel-l1-cp01`, `sentinel-l1-w01`, any old VM or
+either existing switch. It creates NO Kubernetes node or Kubernetes binaries.
+
+No KVP package is installed at first boot: verify DNS and signed APT
+candidate readiness before entering a separately approved guest install
+stage. Adding a second NIC **does not automatically repair** DNS on the
+Default Switch; the purpose is a faithful, controlled comparison.
+
+First run only the read-only plan (Administrator PowerShell):
+
+```powershell
+cd C:\Users\Orzu\projects\sentinel-ai-platform
+git switch feature/stage53-clean-bootstrap
+git pull --ff-only origin feature/stage53-clean-bootstrap
+$imagePath = 'C:\Sentinel\ImageCache\ubuntu\26.04\20261016\5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5.img'
+$digest = '5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5'
+.\infrastructure\level1\tools\New-SentinelWorkerReplicaE2E.ps1 -Mode PLAN -ImagePath $imagePath -ImageSHA256 $digest
+```
+
+Only after reviewing `WORKER_REPLICA_PLAN_READY`, a separate deployment
+approval authorizes one creation; it has **no interactive prompts between
+steps** (the approval token is passed once):
+
+```powershell
+.\infrastructure\level1\tools\New-SentinelWorkerReplicaE2E.ps1 -Mode CREATE -ImagePath $imagePath -ImageSHA256 $digest -Approval CREATE_DISPOSABLE_SENTINEL_E2E_W02
+```
+
+The replica checks that Stage 3's live sandbox nodes, switches, host lab IP,
+target name, directory, planned MAC addresses and host resources are safe
+before creation. Missing or ambiguous evidence blocks. The target IP plan
+uses `.1` host, `.10` control plane, `.11` existing worker and `.12`
+replica; live neighbour-cache absence does not prove uniqueness. Failed
+partial creation remains intact for inspection; do not rerun CREATE on
+an existing target, and never auto-destroy real nodes.
+
+Acceptance criteria are: both NICs on exactly their intended switches and
+MACs; DHCP on management; static `10.78.0.12/24` on private;
+guest-to-host SSH connectivity (host identity remains untrusted until
+independent attestation); correct DNS resolution and accessible repositories;
+`cloud-init status --long` showing done; only then separate KVP install
+and out-of-band VM-ID/nonce-bound SSH host-key verification.
