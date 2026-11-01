@@ -88,6 +88,13 @@ class FirstBootKvpTests(unittest.TestCase):
                 mod.publish(pool,val,fixture=True)
             self.assertEqual(real.read_bytes(),b"")
 
+    def test_firstboot_candidate_check_avoids_early_exit_pipefail(self):
+        sh = SRC.with_name("firstboot-kvp-setup.sh").read_text("utf-8")
+        self.assertIn('policy="$(apt-cache policy "$package")"', sh)
+        self.assertIn('FIRSTBOOT_KVP_CANDIDATE:', sh)
+        self.assertNotIn("awk '/Candidate:/ {print $2; exit}'", sh)
+        self.assertIn("apt-get install -y", sh)
+
     def test_regression_previous_live_kvp_recovery_requires_targeted_udev_activation(self):
         sh = SRC.with_name("firstboot-kvp-setup.sh").read_text("utf-8")
         self.assertIn("linux-cloud-tools-${kernel}", sh)
