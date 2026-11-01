@@ -17,20 +17,18 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot '..\src\Sentinel.WslPaths.psm1') -Force -ErrorAction Stop
 $name = 'sentinel-e2e-ssh01'
 $root = 'C:\Sentinel\E2E-Disposable'
 $helper = Join-Path $PSScriptRoot '..\src\prepare-disk-and-seed.sh'
 $expectedApproval = 'CREATE_DISPOSABLE_SENTINEL_E2E_SSH01'
-function To-WslPath([string]$path) {
-    $result = & wsl.exe -d $Distribution -- wslpath -a $path
-    if ($LASTEXITCODE -ne 0 -or @($result).Count -ne 1 -or -not [string]$result) {
-        throw "BLOCKED: WSL could not translate the image or artifact path"
-    }
-    return ([string]$result).Trim()
-}
 function Invoke-Helper([string[]]$arguments) {
-    $output = & wsl.exe -d $Distribution -- bash (To-WslPath $helper) @arguments 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "BLOCKED: WSL image/seed helper failed (exit $LASTEXITCODE): $($output -join '; ')" }
+    # --exec invokes bash directly. Avoid PowerShell passing backslashes
+    # into a Linux shell where they can be silently stripped.
+    & wsl.exe -d $Distribution --exec bash (ConvertTo-SentinelWslMountPath $helper) @arguments | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "BLOCKED: WSL helper failed (exit $LASTEXITCODE). Review WSL stderr above."
+    }
 }
 $preflight = Join-Path $PSScriptRoot 'Test-SentinelDisposableE2E.ps1'
 # Preflight uses exit, so call as a fresh PowerShell process.
@@ -53,6 +51,22 @@ if ([IO.Path]::GetFileName($imageFile) -cne $expectedFileName -or
 }
 $sha = (Get-FileHash -LiteralPath $imageFile -Algorithm SHA256).Hash
 if ($sha -cne $ImageSHA256.ToUpperInvariant()) { throw 'BLOCKED: approved image SHA256 mismatch' }
+# Cross-check the Stage 2 cache-side metadata; a filename match alone
+# does not establish provenance. The independent Stage 2 approval process
+# remains the source of the reviewed digest.
+$metadataPath = [IO.Path]::ChangeExtension($imageFile, '.json')
+if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) {
+    throw 'BLOCKED: Stage 2 cache metadata .json is missing; cannot verify cached image provenance'
+}
+$metadata = Get-Content -LiteralPath $metadataPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$expectedUrl = 'https://cloud-images.ubuntu.com/releases/26.04/release-' + $buildId + '/ubuntu-26.04-server-cloudimg-amd64.img'
+$imageSize = (Get-Item -LiteralPath $imageFile).Length
+if ([string]$metadata.sha256 -ine $sha -or
+    [string]$metadata.buildId -cne $buildId -or
+    [string]$metadata.sourceUrl -cne $expectedUrl -or
+    [long]$metadata.sizeBytes -ne [long]$imageSize) {
+    throw 'BLOCKED: Stage 2 metadata does not match expected Ubuntu source, build, digest and size'
+}
 $pubFile = Join-Path $HOME '.ssh\id_ed25519.pub'
 if (-not (Test-Path -LiteralPath $pubFile -PathType Leaf)) { throw 'BLOCKED: local SSH public key unavailable' }
 $pub = (Get-Content -LiteralPath $pubFile -Raw).Trim()
@@ -62,7 +76,7 @@ if ($pub -cnotmatch '^ssh-ed25519 [A-Za-z0-9+/]+={0,2}( [^\r\n]*)?$' -or $pub.Co
 if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { throw 'BLOCKED: WSL unavailable' }
 Invoke-Helper -arguments @('check')
 if ($Mode -eq 'PLAN') {
-    Write-Host "E2E_PLAN_READY: reviewed image SHA256=$($sha.ToLowerInvariant()); VM=$name; memory=3GiB; disk=30GiB"
+    Write-Host "E2E_PLAN_READY: Stage 2 cache metadata and image SHA256 match; SHA256=$($sha.ToLowerInvariant()); VM=$name; memory=3GiB; disk=30GiB"
     Write-Host "PLAN_ONLY: no new VM, disks, files, network or SSH trust were modified."
     return
 }
@@ -117,13 +131,23 @@ runcmd:
   - [systemctl, enable, --now, hv-kvp-daemon.service]
 "@
 $meta = "instance-id: $name-$([guid]::NewGuid().ToString('N'))`nlocal-hostname: $name`n"
-$network = "version: 2`nethernets:`n  mgmt:`n    dhcp4: true`n    dhcp6: false`n"
+# Match Hyper-V's real Linux ethernet interface, which is not named "mgmt".
+# cloud-init/netplan match-name globbing is supported with networkd.
+$network = @"
+version: 2
+ethernets:
+  hv-management:
+    match:
+      name: 'e*'
+    dhcp4: true
+    dhcp6: false
+"@
 foreach ($pair in @(@($userPath,$userData),@($metaPath,$meta),@($netPath,$network))) {
     [IO.File]::WriteAllText([string]$pair[0],[string]$pair[1],[Text.UTF8Encoding]::new($false))
 }
-Invoke-Helper -arguments @('disk',(To-WslPath $imageFile),(To-WslPath $disk))
+Invoke-Helper -arguments @('disk',(ConvertTo-SentinelWslMountPath $imageFile),(ConvertTo-SentinelWslMountPath $disk))
 Resize-VHD -Path $disk -SizeBytes (30GB) -ErrorAction Stop
-Invoke-Helper -arguments @('seed',(To-WslPath $userPath),(To-WslPath $metaPath),(To-WslPath $netPath),(To-WslPath $seed))
+Invoke-Helper -arguments @('seed',(ConvertTo-SentinelWslMountPath $userPath),(ConvertTo-SentinelWslMountPath $metaPath),(ConvertTo-SentinelWslMountPath $netPath),(ConvertTo-SentinelWslMountPath $seed))
 $vm = New-VM -Name $name -Generation 2 -Path $folder -VHDPath $disk -SwitchName 'Default Switch' -MemoryStartupBytes (3GB) -ErrorAction Stop
 Set-VMMemory -VMName $name -DynamicMemoryEnabled $false -StartupBytes (3GB)
 Set-VMProcessor -VMName $name -Count 2
