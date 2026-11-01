@@ -1,0 +1,59 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+  Stage 5.4 single-command disposable VM -> KVP -> pinned SSH -> Ansible.
+.DESCRIPTION
+  PLAN is read-only and requires no approval. RUN is a separately approved,
+  non-destructive one-time pipeline for a NONEXISTENT disposable slot only.
+  If cloud-init or KVP fails, do not attempt SSH, accept unknown keys, destroy
+  state or silently adopt an old VM. Inspect guest console and retry VERIFY.
+#>
+[CmdletBinding()]
+param(
+    [ValidateSet('PLAN','RUN')][string]$Mode = 'PLAN',
+    [ValidateRange(20,29)][int]$Slot = 20,
+    [Parameter(Mandatory)][string]$ImagePath,
+    [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ImageSHA256,
+    [string]$WSLPrivateKey = '/home/orzu/.ssh/id_ed25519',
+    [string]$Approval
+)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+if ($Mode -eq 'RUN' -and $Approval -cne 'CREATE_AND_REGISTER_FRESH_SENTINEL_STAGE54') {
+    throw 'BLOCKED: explicit one-time Stage54 CREATE + TRUST approval required'
+}
+$create = Join-Path $PSScriptRoot 'New-SentinelStage54VM.ps1'
+$trust = Join-Path $PSScriptRoot 'Invoke-SentinelStage54Trust.ps1'
+if (-not (Test-Path -LiteralPath $create -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $trust -PathType Leaf)) {
+    throw 'BLOCKED: pinned source components missing'
+}
+if ($Mode -eq 'PLAN') {
+    & $create -Mode PLAN -Slot $Slot -ImagePath $ImagePath -ImageSHA256 $ImageSHA256
+    Write-Host 'STAGE54_ORCHESTRATOR_PLAN_READY: no VM or SSH trust change.'
+    return
+}
+# Explicit operator approval is split into two scoped sub-step authorizations.
+& $create -Mode CREATE -Slot $Slot -ImagePath $ImagePath -ImageSHA256 $ImageSHA256 -Approval CREATE_FRESH_DISPOSABLE_SENTINEL_STAGE54
+Write-Host 'STAGE54_WAITING_FOR_FIRSTBOOT_KVP: no network SSH has been attempted.'
+$verified = $false
+for ($i=1; $i -le 120; $i++) {
+    try {
+        & $trust -Mode VERIFY -Slot $Slot
+        $verified = $true
+        break
+    } catch {
+        if ($i -eq 120) {
+            throw 'BLOCKED: no fresh KVP identity after 10 minutes; use VM console/cloud-init. Never auto-trust or retry VM creation.'
+        }
+        if ($i % 12 -eq 0) {
+            Write-Host "STAGE54_WAIT_KVP: first boot still pending after $($i * 5) seconds; no SSH fallback."
+        }
+        Start-Sleep -Seconds 5
+    }
+}
+if (-not $verified) { throw 'BLOCKED: KVP verification failed' }
+& $trust -Mode REGISTER -Slot $Slot -Approval REGISTER_KVP_VERIFIED_SENTINEL_STAGE54_HOST_KEY
+& $trust -Mode ACCEPT -Slot $Slot
+& $trust -Mode ANSIBLE -Slot $Slot -WSLPrivateKey $WSLPrivateKey
+Write-Host "STAGE54_ZERO_TOUCH_E2E_PASS: sentinel-e2e-auto$Slot; VM created -> KVP verified -> trusted SSH -> Ansible."
