@@ -40,7 +40,7 @@ class KvpApplySafetyTests(unittest.TestCase):
         tasks = self.plays[0]["tasks"]
         self.assertTrue(any("ansible.builtin.stat" in task and
                             any("/etc/kubernetes/" in x or "/var/lib/kubelet/" in x
-                                for x in task["ansible.builtin.stat"]["loop"])
+                                for x in task["loop"])
                             for task in tasks if "ansible.builtin.stat" in task))
         self.assertTrue(any("existing Kubernetes" in str(task.get("name", "")) for task in tasks))
         self.assertTrue(any("Kubernetes state" in str(task.get("ansible.builtin.assert", {}).get("fail_msg", ""))
