@@ -42,7 +42,7 @@ if ($ExpectedVMId -eq [guid]::Empty) { throw 'BLOCKED: expected VM GUID must not
 if ($Mode -eq 'REMOVE' -and $Approval -cne $approvalToken) {
     throw 'BLOCKED: explicit REMOVE_DISPOSABLE_SENTINEL_E2E_SSH01 token required'
 }
-foreach ($command in @('Get-VM','Get-VMHardDiskDrive','Get-VMDvdDrive','Get-VMSnapshot','Get-VMNetworkAdapter')) {
+foreach ($command in @('Get-VM','Get-VMHardDiskDrive','Get-VMDvdDrive','Get-VMSnapshot','Get-VMNetworkAdapter','Get-VHD')) {
     if (-not (Get-Command $command -ErrorAction SilentlyContinue)) {
         throw "BLOCKED: missing Hyper-V command $command"
     }
@@ -87,21 +87,64 @@ if (-not (Test-PathBelow -Path ([string]$vm.Path) -Directory $folder)) {
     throw 'BLOCKED: VM configuration resides outside disposable VM directory'
 }
 $disks = @(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop)
-# Show the exact Hyper-V layout on mismatch; never infer ownership or delete.
-$diskPaths = @($disks | ForEach-Object {
-    if ([string]::IsNullOrWhiteSpace([string]$_.Path)) { '<blank>' } else { [string]$_.Path }
-})
-$diskValid = $false
-if ($disks.Count -eq 1 -and -not [string]::IsNullOrWhiteSpace([string]$disks[0].Path)) {
-    $diskValid = [string]::Equals(
-        [IO.Path]::GetFullPath([string]$disks[0].Path),
-        [IO.Path]::GetFullPath($expectedDisk),
-        [StringComparison]::OrdinalIgnoreCase
-    )
+if ($disks.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$disks[0].Path)) {
+    throw ("BLOCKED: expected exactly one attached disk; Hyper-V returned {0}" -f $disks.Count)
 }
-if (-not $diskValid) {
-    throw ("BLOCKED: unexpected VM disk attachment. Expected one attached disk '{0}'; Hyper-V returned {1}: {2}. No modifications performed." -f
-        $expectedDisk, $disks.Count, ($diskPaths -join ' ; '))
+$attachedPath = [IO.Path]::GetFullPath([string]$disks[0].Path)
+$basePath = [IO.Path]::GetFullPath($expectedDisk)
+if (-not (Test-PathBelow -Path $attachedPath -Directory $folder)) {
+    throw "BLOCKED: attached disk escapes disposable VM directory: $attachedPath"
+}
+if (-not (Test-Path -LiteralPath $basePath -PathType Leaf)) {
+    throw "BLOCKED: original OS VHDX missing: $basePath"
+}
+$baseVhd = Get-VHD -Path $basePath -ErrorAction Stop
+if ($baseVhd.VhdType -notin @('Dynamic','Fixed') -or
+    -not [string]::IsNullOrWhiteSpace([string]$baseVhd.ParentPath)) {
+    throw 'BLOCKED: base disk is itself a differencing disk or unsupported image type'
+}
+$diskTopology = 'base-vhdx'
+if (-not [string]::Equals($attachedPath,$basePath,[StringComparison]::OrdinalIgnoreCase)) {
+    # Hyper-V Automatic Checkpoints commonly switch the live attachment
+    # from os.vhdx to os_<GUID>.avhdx. Never assume an arbitrary AVHDX is safe.
+    $basename = [IO.Path]::GetFileName($attachedPath)
+    if ($basename -notmatch '^os_[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\.avhdx$') {
+        throw "BLOCKED: unexpected differencing disk filename: $basename"
+    }
+    $delta = Get-VHD -Path $attachedPath -ErrorAction Stop
+    $parent = [string]$delta.ParentPath
+    if ($delta.VhdType -ne 'Differencing' -or
+        [string]::IsNullOrWhiteSpace($parent) -or
+        -not [string]::Equals(
+            [IO.Path]::GetFullPath($parent),
+            $basePath,
+            [StringComparison]::OrdinalIgnoreCase
+        )) {
+        throw ("BLOCKED: attached AVHDX is not a verified single-child differencing disk. Attached={0}; parent={1}; type={2}" -f
+            $attachedPath,$parent,$delta.VhdType)
+    }
+    $diskTopology = 'single-avhdx-differencing-child'
+}
+$allDeltaFiles = @(Get-ChildItem -LiteralPath $folder -Recurse -Force -File -Filter '*.avhdx' -ErrorAction Stop)
+if ($diskTopology -eq 'base-vhdx' -and $allDeltaFiles.Count -ne 0) {
+    throw 'BLOCKED: unexpected orphaned AVHDX files alongside the base disk'
+}
+if ($diskTopology -eq 'single-avhdx-differencing-child' -and
+    ($allDeltaFiles.Count -ne 1 -or
+     -not [string]::Equals([string]$allDeltaFiles[0].FullName,$attachedPath,[StringComparison]::OrdinalIgnoreCase))) {
+    throw 'BLOCKED: additional or unexpected AVHDX files found in disposable tree'
+}
+$checkpoints = @(Get-VMSnapshot -VM $vm -ErrorAction Stop)
+if ($checkpoints.Count -gt 1) {
+    throw "BLOCKED: more than one checkpoint exists ($($checkpoints.Count)); inspect before cleanup"
+}
+if ($checkpoints.Count -gt 0) {
+    # A checkpoint's VM configuration must also live inside our exclusive
+    # disposable folder; no outside snapshot storage is ever removed.
+    if ([string]::IsNullOrWhiteSpace([string]$vm.SnapshotFileLocation) -or
+        -not (Test-PathBelow -Path ([string]$vm.SnapshotFileLocation) -Directory $folder)) {
+        throw 'BLOCKED: checkpoint storage is outside disposable VM directory'
+    }
 }
 $dvds = @(Get-VMDvdDrive -VM $vm -ErrorAction Stop)
 if ($dvds.Count -ne 1 -or -not
@@ -111,9 +154,6 @@ if ($dvds.Count -ne 1 -or -not
 $nics = @(Get-VMNetworkAdapter -VM $vm -ErrorAction Stop)
 if ($nics.Count -ne 1 -or $nics[0].SwitchName -cne 'Default Switch') {
     throw 'BLOCKED: unexpected VM network attachment'
-}
-if (@(Get-VMSnapshot -VM $vm -ErrorAction Stop).Count -gt 0) {
-    throw 'BLOCKED: VM checkpoints exist; inspect checkpoint storage separately'
 }
 foreach ($other in @($allVMs | Where-Object { $_.Id -ne $ExpectedVMId })) {
     foreach ($attachment in @(
@@ -137,6 +177,9 @@ foreach ($other in @($allVMs | Where-Object { $_.Id -ne $ExpectedVMId })) {
     Directory = $root
     VMConfiguration = [string]$vm.Path
     Disk = $disks[0].Path
+    BaseDisk = $basePath
+    DiskTopology = $diskTopology
+    CheckpointCount = $checkpoints.Count
     Seed = $dvds[0].Path
     ProtectedVMsUntouched = $true
     Stage2ImageCacheUntouched = $true
@@ -149,6 +192,14 @@ if ($Mode -eq 'PLAN') {
 $fresh = @(Get-VM -Name $vmName -ErrorAction Stop)
 if ($fresh.Count -ne 1 -or $fresh[0].Id -ne $ExpectedVMId) {
     throw 'BLOCKED: VM changed after cleanup validation'
+}
+$freshDisks = @(Get-VMHardDiskDrive -VM $fresh[0] -ErrorAction Stop)
+if ($freshDisks.Count -ne 1 -or
+    -not [string]::Equals([string]$freshDisks[0].Path,$attachedPath,[StringComparison]::OrdinalIgnoreCase)) {
+    throw 'BLOCKED: attached disk changed after validation; no deletion'
+}
+if (@(Get-VMSnapshot -VM $fresh[0] -ErrorAction Stop).Count -ne $checkpoints.Count) {
+    throw 'BLOCKED: checkpoint count changed after validation; no deletion'
 }
 if ($fresh[0].State -ne 'Off') {
     Stop-VM -VM $fresh[0] -TurnOff -Force -ErrorAction Stop
