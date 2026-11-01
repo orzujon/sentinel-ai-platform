@@ -240,6 +240,12 @@ ethernets:
       macaddress: '$m1'
     dhcp4: true
     dhcp6: false
+    # Isolated Stage54 lab: DHCP-provided DNS failed in the prior w02 run.
+    # Set the already-tested resolver before cloud-init's APT package stage.
+    dhcp4-overrides:
+      use-dns: false
+    nameservers:
+      addresses: ['1.1.1.1']
   private:
     match:
       macaddress: '$m2'
