@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -78,6 +77,9 @@ def build_value(node: str, ip: str, nonce: str, host_public_key: str) -> str:
 
 
 def publish(pool: Path, record_value: str, *, allowed_path: bool = True) -> None:
+    if os.name != 'posix' or not sys.platform.startswith('linux'):
+        raise TrustBlocked('KVP pool publication is supported only inside a Linux guest')
+    import fcntl  # Linux-only; Windows can import and test validation functions.
     if allowed_path and pool not in POOL_PATHS:
         raise TrustBlocked("Only the supported Hyper-V guest KVP pool is permitted")
     if pool.is_symlink() or not pool.is_file():
@@ -130,7 +132,7 @@ def main(argv=None):
         if not args.apply:
             print("PLAN_ONLY: valid host key and provisioning nonce; no pool touched")
             return 0
-        if args.approval != APPROVAL or os.geteuid() != 0:
+        if args.approval != APPROVAL or not hasattr(os, 'geteuid') or os.geteuid() != 0:
             raise TrustBlocked("Explicit fresh-VM approval and root privileges required")
         if any(Path(path).exists() for path in (
             "/etc/kubernetes/admin.conf", "/etc/kubernetes/kubelet.conf",
