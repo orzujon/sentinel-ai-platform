@@ -52,7 +52,7 @@ if ($pub -cnotmatch '^ssh-ed25519 [A-Za-z0-9+/]+={0,2}( [^\r\n]*)?$' -or $pub.Co
     throw 'BLOCKED: one valid ED25519 SSH login public key required'
 }
 if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { throw 'BLOCKED: WSL unavailable' }
-Invoke-Helper @('check')
+Invoke-Helper -arguments @('check')
 if ($Mode -eq 'PLAN') {
     Write-Host "E2E_PLAN_READY: reviewed image SHA256=$($sha.ToLowerInvariant()); VM=$name; memory=3GiB; disk=30GiB"
     Write-Host "PLAN_ONLY: no new VM, disks, files, network or SSH trust were modified."
@@ -98,7 +98,7 @@ users:
       - $pub
 packages:
   - openssh-server
-  - linux-cloud-tools-common
+  - [linux-cloud-tools-common, '7.0.0-42.42']
 write_files:
   - path: /var/lib/sentinel/provisioning-nonce
     permissions: '0600'
@@ -113,9 +113,9 @@ $network = "version: 2`nethernets:`n  mgmt:`n    dhcp4: true`n    dhcp6: false`n
 foreach ($pair in @(@($userPath,$userData),@($metaPath,$meta),@($netPath,$network))) {
     [IO.File]::WriteAllText([string]$pair[0],[string]$pair[1],[Text.UTF8Encoding]::new($false))
 }
-Invoke-Helper @('disk',(To-WslPath $imageFile),(To-WslPath $disk))
+Invoke-Helper -arguments @('disk',(To-WslPath $imageFile),(To-WslPath $disk))
 Resize-VHD -Path $disk -SizeBytes (30GB) -ErrorAction Stop
-Invoke-Helper @('seed',(To-WslPath $userPath),(To-WslPath $metaPath),(To-WslPath $netPath),(To-WslPath $seed))
+Invoke-Helper -arguments @('seed',(To-WslPath $userPath),(To-WslPath $metaPath),(To-WslPath $netPath),(To-WslPath $seed))
 $vm = New-VM -Name $name -Generation 2 -Path $folder -VHDPath $disk -SwitchName 'Default Switch' -MemoryStartupBytes (3GB) -ErrorAction Stop
 Set-VMMemory -VMName $name -DynamicMemoryEnabled $false -StartupBytes (3GB)
 Set-VMProcessor -VMName $name -Count 2
