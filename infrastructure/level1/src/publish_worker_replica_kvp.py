@@ -106,7 +106,7 @@ def append_once(pool: Path, value: str, *, test_pool: bool = False) -> str:
 
     if pool.is_symlink() or not pool.is_file():
         raise Blocked("KVP pool is absent, symlinked, or not regular")
-    fd = os.open(pool, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+    fd = os.open(pool, os.O_RDWR | os.O_NOFOLLOW)
     try:
         with os.fdopen(fd, "r+b", buffering=0) as stream:
             metadata = os.fstat(stream.fileno())
