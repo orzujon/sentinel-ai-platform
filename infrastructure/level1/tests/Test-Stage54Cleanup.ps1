@@ -6,7 +6,8 @@ $root = Join-Path $PSScriptRoot '..'
 $script = Join-Path $root 'tools\Remove-SentinelStage54Disposable.ps1'
 $provisioner = Join-Path $root 'tools\New-SentinelStage54VM.ps1'
 $pipeline = Join-Path $root 'tools\Invoke-SentinelStage54.ps1'
-foreach ($path in @($script,$provisioner,$pipeline)) {
+$layoutModule = Join-Path $root 'src\Sentinel.HyperVDisposableLayout.psm1'
+foreach ($path in @($script,$provisioner,$pipeline,$layoutModule)) {
     $tokens=$null; $errors=$null
     [void][Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
     if ($errors.Count -ne 0) {
@@ -57,13 +58,10 @@ foreach ($required in @(
     'Remove-VM -VM',
     'Remove-Item -LiteralPath $folder',
     'Stop-VM -VM $again -Shutdown',
+    'Assert-SentinelHyperVConfigLayout -ConfigDirectory $configDir -ExpectedVMId $ExpectedVMId',
     'CLEANUP_NESTED_HYPERV_CONFIG_VERIFIED',
     'CLEANUP_NESTED_PATH_MISMATCH',
-    'CLEANUP_CONFIG_FILE_CANDIDATES',
     'CLEANUP_UNRECOGNISED_NESTED_ENTRY',
-    'CLEANUP_UNOWNED_CONFIG_ENTRY',
-    '$configFiles[0].BaseName -ine ([string]$ExpectedVMId)',
-    'Get-ChildItem -LiteralPath $configDir',
     'Test-InFolder -Candidate ([string]$vm.Path) -Directory $nested',
     'Get-VMSnapshot -VM $vm',
     'CLEANUP_UNRECOGNISED_ENTRY:',
@@ -87,8 +85,7 @@ foreach ($forbidden in @('Stop-VM -TurnOff','Stop-VM -Force','Remove-VMSwitch','
 # folders must not contain foreign VM disks, checkpoints or unknown files.
 if (-not $source.Contains('if ($allowNested) { $topAllowed += $name }') -or
     -not $source.Contains('if (-not (Test-InFolder -Candidate ([string]$vm.Path) -Directory $nested))') -or
-    -not $source.Contains('$configFiles.Count -ne 1') -or
-    -not $source.Contains('if ($unownedConfig.Count -ne 0)') -or
+    -not $source.Contains('Assert-SentinelHyperVConfigLayout -ConfigDirectory $configDir -ExpectedVMId $ExpectedVMId') -or
     -not $source.Contains('if ($unexpectedNested.Count -ne 0)') -or
     -not $source.Contains('Snapshots') -or
     -not $source.Contains('if ($unexpected.Count -ne 0)')) {
@@ -109,4 +106,69 @@ if (-not $createSource.Contains('STAGE54_CLEANUP_REQUIRED') -or
 if ($pipelineSource.IndexOf('& $create -Mode PLAN') -gt $pipelineSource.IndexOf('Assert-AnsibleControllerReady'+[char]10+'if ($Mode')) {
     throw 'BLOCKED: cleanup and VM plan must precede controller preflight'
 }
+
+# Real file-system fixtures exercise the SAME pure helper used by cleanup.
+# They never call Remove-VM or touch any Hyper-V object.
+Import-Module $layoutModule -Force -ErrorAction Stop
+$sourceLayout = Get-Content -LiteralPath $layoutModule -Raw -Encoding UTF8
+foreach ($guard in @(
+    'CLEANUP_UNOWNED_CONFIG_ENTRY',
+    'CLEANUP_UNRECOGNISED_RUNTIME_ENTRY',
+    'CLEANUP_VM_UUID_RUNTIME_VERIFIED',
+    'CLEANUP_CONFIG_FILE_CANDIDATES',
+    "'.vmcx'",
+    'ReparsePoint',
+    'ExpectedVMId'
+)) {
+    if (-not $sourceLayout.Contains($guard)) {
+        throw "BLOCKED: missing GUID-aware nested Hyper-V validator guard $guard"
+    }
+}
+
+$fixture = Join-Path $env:TEMP ('sentinel-stage54-layout-' + [guid]::NewGuid().ToString('N'))
+[void](New-Item -ItemType Directory -LiteralPath $fixture -ErrorAction Stop)
+try {
+    $vmId = [guid]::NewGuid()
+    $uuid = $vmId.ToString('D').ToUpperInvariant()
+    $vmcx = Join-Path $fixture ($uuid + '.vmcx')
+    $vmgs = Join-Path $fixture ($uuid + '.vmgs')
+    $vmrs = Join-Path $fixture ($uuid + '.vmrs')
+    foreach ($path in @($vmcx,$vmgs,$vmrs)) {
+        [IO.File]::WriteAllBytes($path,[byte[]](1,2,3))
+    }
+    $runtime = Join-Path $fixture $uuid
+    [void](New-Item -ItemType Directory -LiteralPath $runtime -ErrorAction Stop)
+    if ((Assert-SentinelHyperVConfigLayout -ConfigDirectory $fixture -ExpectedVMId $vmId) -cne 'VERIFIED') {
+        throw 'BLOCKED: exact GUID-matching empty runtime folder should be accepted'
+    }
+    $oldRuntime = Join-Path $runtime ($uuid + '.bin')
+    [IO.File]::WriteAllBytes($oldRuntime,[byte[]](1,2))
+    if ((Assert-SentinelHyperVConfigLayout -ConfigDirectory $fixture -ExpectedVMId $vmId) -cne 'VERIFIED') {
+        throw 'BLOCKED: exact GUID-matching historical VM state file should be accepted'
+    }
+    # Unknown files must still stop the cleanup preflight without mutations.
+    $foreign = Join-Path $runtime 'other-vm.bin'
+    [IO.File]::WriteAllBytes($foreign,[byte[]](1))
+    Expect-Blocked { Assert-SentinelHyperVConfigLayout -ConfigDirectory $fixture -ExpectedVMId $vmId }
+    if (-not [IO.File]::Exists($foreign)) {
+        throw 'BLOCKED: inspection unexpectedly deleted foreign test data'
+    }
+    [IO.File]::Delete($foreign)
+    $foreignDir = Join-Path $fixture ([guid]::NewGuid().ToString('D'))
+    [void](New-Item -ItemType Directory -LiteralPath $foreignDir -ErrorAction Stop)
+    Expect-Blocked { Assert-SentinelHyperVConfigLayout -ConfigDirectory $fixture -ExpectedVMId $vmId }
+    Remove-Item -LiteralPath $foreignDir -Recurse -Force
+    $unexpectedFile = Join-Path $fixture 'config-note.txt'
+    [IO.File]::WriteAllBytes($unexpectedFile,[byte[]](1))
+    Expect-Blocked { Assert-SentinelHyperVConfigLayout -ConfigDirectory $fixture -ExpectedVMId $vmId }
+    [IO.File]::Delete($unexpectedFile)
+    Expect-Blocked {
+        Assert-SentinelHyperVConfigLayout -ConfigDirectory $fixture -ExpectedVMId ([guid]::NewGuid())
+    }
+    Write-Host 'PASS: GUID folder accepts exact VM-owned files only; foreign runtime/config entries and wrong UUID block'
+} finally {
+    # CI-created TEMP fixtures only; never production VM disks.
+    Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction Stop
+}
+
 Write-Host 'PASS: exact-UUID disposal, protection checks, no-force graceful shutdown and cleanup-before-create enforcement'
