@@ -50,6 +50,11 @@ function Assert-SentinelKvpIdentity {
         'sentinel-e2e-w02'='10.78.0.12'
     }
     $node = [string]$ManifestEntry.node
+    # Fresh disposable slots are approved only in the separate auto20..auto29
+    # range. The existing Kubernetes nodes retain their historical pinning.
+    if ($node -cmatch '^sentinel-e2e-auto(2[0-9])$') {
+        $expected[$node] = '10.78.0.' + $Matches[1]
+    }
     if (-not $expected.ContainsKey($node) -or [string]$ManifestEntry.ip -cne $expected[$node]) {
         throw 'BLOCKED: unknown or unpinned guest network identity'
     }
