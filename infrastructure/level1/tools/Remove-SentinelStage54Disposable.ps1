@@ -107,7 +107,17 @@ function Assert-CurrentSafety {
         $_.Name -cnotin $topAllowed
     })
     if ($unexpected.Count -ne 0) {
-        throw 'BLOCKED: unexpected top-level file inside disposable VM directory; inspect before removing'
+        # Visibility, not trust expansion: report the exact unknown paths
+        # and metadata without reading contents, copying or deleting anything.
+        # Neither PLAN nor REMOVE may proceed until reviewed explicitly.
+        Write-Warning ("CLEANUP_UNRECOGNISED_ENTRIES: count={0}; no deletion performed." -f $unexpected.Count)
+        foreach ($item in $unexpected) {
+            $kind = if ($item.PSIsContainer) { 'directory' } else { 'file' }
+            $bytes = if ($item.PSIsContainer) { 'n/a' } else { [string]$item.Length }
+            Write-Host ("CLEANUP_UNRECOGNISED_ENTRY: type={0}; bytes={1}; attributes={2}; path={3}" -f
+                $kind, $bytes, [string]$item.Attributes, [string]$item.FullName)
+        }
+        throw ("BLOCKED: {0} unrecognised disposable top-level entries; review each path before changing allowlist or deleting anything." -f $unexpected.Count)
     }
     $manifestFile = Get-Item -LiteralPath $manifestPath -Force
     if ($manifestFile.Length -gt 8192 -or $manifestFile.PSIsContainer) {
