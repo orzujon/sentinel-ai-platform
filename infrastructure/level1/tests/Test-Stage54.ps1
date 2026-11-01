@@ -95,6 +95,8 @@ foreach ($req in @(
     "Invoke-SentinelStage54Trust.ps1",
     "Start-Sleep",
     "STAGE54_WAITING_FOR_FIRSTBOOT_KVP",
+    "ssh-keygen -y",
+    "does not match cloud-init authorised public login key",
     "STAGE54_ZERO_TOUCH_E2E_PASS"
 )) {
     if (-not $pipelineSrc.Contains($req)) { throw "BLOCKED: run orchestrator missing: $req" }
