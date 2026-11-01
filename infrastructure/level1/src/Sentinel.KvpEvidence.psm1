@@ -47,6 +47,7 @@ function Assert-SentinelKvpIdentity {
     $expected = @{
         'sentinel-l1-cp01'='10.78.0.10'
         'sentinel-l1-w01'='10.78.0.11'
+        'sentinel-e2e-w02'='10.78.0.12'
     }
     $node = [string]$ManifestEntry.node
     if (-not $expected.ContainsKey($node) -or [string]$ManifestEntry.ip -cne $expected[$node]) {
