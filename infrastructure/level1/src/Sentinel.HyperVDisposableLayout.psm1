@@ -23,7 +23,7 @@ function Assert-SentinelHyperVConfigLayout {
     }
 
     $vmId = $ExpectedVMId.ToString('D')
-    $validConfigFiles = @($vmId + '.vmcx', $vmId + '.vmrs', $vmId + '.vmgs')
+    $validConfigFiles = @(($vmId + '.vmcx'), ($vmId + '.vmrs'), ($vmId + '.vmgs'))
     $configFiles = @(Get-ChildItem -LiteralPath $ConfigDirectory -Force -File -Filter '*.vmcx' -ErrorAction Stop)
     if ($configFiles.Count -ne 1 -or $configFiles[0].BaseName -ine $vmId) {
         Write-Host ("CLEANUP_CONFIG_FILE_CANDIDATES: {0}" -f
@@ -59,7 +59,7 @@ function Assert-SentinelHyperVConfigLayout {
         }
         # Older Hyper-V configurations can leave VM-ID-named .bin/.vsv
         # runtime files here. No arbitrary names or further directories.
-        $allowedRuntime = @($vmId + '.bin', $vmId + '.vsv')
+        $allowedRuntime = @(($vmId + '.bin'), ($vmId + '.vsv'))
         foreach ($entry in @(Get-ChildItem -LiteralPath $runtime -Force -ErrorAction Stop)) {
             if ($entry.PSIsContainer -or
                 ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
