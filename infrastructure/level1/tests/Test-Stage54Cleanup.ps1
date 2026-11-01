@@ -57,7 +57,7 @@ foreach ($required in @(
     'Get-VM -ErrorAction Stop',
     'Remove-VM -VM',
     'Remove-Item -LiteralPath $folder',
-    'Stop-VM -VM $again -Shutdown',
+    'Stop-VM -VM $again -ErrorAction Stop',
     'Assert-SentinelHyperVConfigLayout -ConfigDirectory $configDir -ExpectedVMId $ExpectedVMId',
     'CLEANUP_NESTED_HYPERV_CONFIG_VERIFIED',
     'CLEANUP_NESTED_PATH_MISMATCH',
@@ -75,11 +75,24 @@ foreach ($required in @(
 )) {
     if (-not $source.Contains($required)) { throw "BLOCKED: missing cleanup safeguard: $required" }
 }
-foreach ($forbidden in @('Stop-VM -TurnOff','Stop-VM -Force','Remove-VMSwitch','New-VMSwitch','Set-VMNetworkAdapter','Remove-VMHardDiskDrive','Remove-VHD','ssh-keyscan','Read-Host')) {
+foreach ($forbidden in @('Stop-VM -TurnOff','Stop-VM -Force','Stop-VM -VM $again -Shutdown','Remove-VMSwitch','New-VMSwitch','Set-VMNetworkAdapter','Remove-VMHardDiskDrive','Remove-VHD','ssh-keyscan','Read-Host')) {
     if ($source.Contains($forbidden)) {
         throw "BLOCKED: cleanup has unsafe operation or unexpected external command: $forbidden"
     }
 }
+# Prevent the 2026-11-01 live cleanup bug: -Shutdown is not a Stop-VM parameter.
+# Assert the actual parsed Stop-VM invocation has no unsupported or power-cut switches.
+$stopTokens = $null; $stopErrors = $null
+$stopAst = [Management.Automation.Language.Parser]::ParseFile($script,[ref]$stopTokens,[ref]$stopErrors)
+$stopCalls = @($stopAst.FindAll({ param($node)
+    $node -is [Management.Automation.Language.CommandAst] -and
+    $node.GetCommandName() -ceq 'Stop-VM'
+},$true))
+if ($stopCalls.Count -ne 1 -or $stopCalls[0].Extent.Text -cne 'Stop-VM -VM $again -ErrorAction Stop') {
+    throw 'BLOCKED: cleanup must use one supported graceful Stop-VM command without -Shutdown, -Force or -TurnOff'
+}
+Write-Host 'PASS: graceful Stop-VM invocation uses supported syntax and rejects forced shutdown'
+
 # Regression for the actual 2026-11-01 runtime failure: the real cleanup
 # PLAN referenced $configDir before assignment even though static tests passed.
 # Locate the assignment and consumer as parsed AST nodes, not a string
