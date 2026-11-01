@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import os
+import subprocess
 import unittest
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "publish_firstboot_kvp.py"
@@ -94,6 +96,53 @@ class FirstBootKvpTests(unittest.TestCase):
         self.assertIn('FIRSTBOOT_KVP_CANDIDATE:', sh)
         self.assertNotIn("awk '/Candidate:/ {print $2; exit}'", sh)
         self.assertIn("apt-get install -y", sh)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Bash fixture runs on Linux CI")
+    def test_real_firstboot_candidate_loop_with_large_apt_policy_output(self):
+        """Execute the actual firstboot candidate loop with a mocked apt-cache.
+
+        A large response reproduces the early-exit SIGPIPE risk under pipefail,
+        while keeping the fixture completely offline and non-mutating.
+        """
+        source = SRC.with_name("firstboot-kvp-setup.sh").read_text("utf-8")
+        start = source.index('packages=(linux-cloud-tools-common ')
+        end = source.index("echo 'FIRSTBOOT_KVP_PACKAGE_CANDIDATES_PASS:", start)
+        candidate_loop = source[start:end]
+        self.assertIn('policy="$(apt-cache policy "$package")"', candidate_loop)
+        fake_apt_cache = """#!/bin/sh
+[ "$1" = policy ] || exit 7
+case "$2" in
+  linux-cloud-tools-common) version='7.0.0-42.42' ;;
+  linux-cloud-tools-7.0.0-38|linux-cloud-tools-7.0.0-38-generic) version='7.0.0-38.38' ;;
+  *) exit 8 ;;
+esac
+if [ "${BLOCK_CANDIDATE:-}" = "$2" ]; then version='(none)'; fi
+printf 'Installed: (none)\\nCandidate: %s\\n' "$version"
+head -c 150000 /dev/zero | tr '\\000' 'x'
+printf '\\n'
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            mock = Path(directory) / "apt-cache"
+            mock.write_text(fake_apt_cache, "utf-8")
+            mock.chmod(0o755)
+            base_env = os.environ.copy()
+            base_env["PATH"] = directory + os.pathsep + base_env["PATH"]
+            code = ("set -euo pipefail\\n"
+                    "kernel=7.0.0-38-generic\\n"
+                    "generic_base=7.0.0-38\\n"
+                    + candidate_loop
+                    + "echo CANDIDATES_PASS\\n")
+            success = subprocess.run(["bash", "-c", code], env=base_env,
+                                     capture_output=True, text=True, timeout=15)
+            self.assertEqual(success.returncode, 0, success.stderr)
+            self.assertEqual(success.stdout.count("FIRSTBOOT_KVP_CANDIDATE:"), 3)
+            self.assertIn("CANDIDATES_PASS", success.stdout)
+            base_env["BLOCK_CANDIDATE"] = "linux-cloud-tools-7.0.0-38-generic"
+            blocked = subprocess.run(["bash", "-c", code], env=base_env,
+                                     capture_output=True, text=True, timeout=15)
+            self.assertNotEqual(blocked.returncode, 0)
+            self.assertIn("missing signed Ubuntu package candidate", blocked.stderr)
+            self.assertNotIn("CANDIDATES_PASS", blocked.stdout)
 
     def test_regression_previous_live_kvp_recovery_requires_targeted_udev_activation(self):
         sh = SRC.with_name("firstboot-kvp-setup.sh").read_text("utf-8")
