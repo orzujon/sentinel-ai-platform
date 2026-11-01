@@ -489,10 +489,13 @@ and out-of-band VM-ID/nonce-bound SSH host-key verification.
 
 ### Stage 5.3.3 — Disposable guest SSH PUBLIC host-key publication through KVP
 
-**Lab prerequisite (1 November 2026):** The disposable Ubuntu VM
-`sentinel-e2e-w02` now runs a stable kernel-matched KVP daemon, and
-Windows reports its Key-Value Pair Exchange integration service as `OK`.
-That confirms the transport, **not yet** a published SSH identity record.
+**Verified lab result (1 November 2026):** The disposable Ubuntu VM
+`sentinel-e2e-w02` runs a stable kernel-matched KVP daemon and the Windows
+Key-Value Pair Exchange integration reports `OK`. The published SSH host
+public-key record was subsequently retrieved through Hyper-V WMI/CIM and
+matched the provisioner-created VM UUID/nonce and the network SSH host key:
+`SENTINEL_KVP_SSH_IDENTITY_EVIDENCE_MATCH`. This is **evidence**, not yet
+a write to an SSH host-key trust store.
 
 The new tool `Invoke-SentinelWorkerReplicaKvpIdentity.ps1` supports:
 
@@ -530,3 +533,60 @@ published. Do not promote the diagnostic `known_hosts` file to production.
 Trusted key registration is a separate reviewed stage.
 
 Source: https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/integration-services-data-exchange
+
+
+### Stage 5.3.4 — Approved, isolated, KVP-verified SSH host trust (Windows)
+
+**Prerequisite:** Stage 5.3.3 passed on disposable `sentinel-e2e-w02`.
+Never use these commands against the existing Kubernetes nodes.
+
+`infrastructure/level1/tools/Invoke-SentinelWorkerReplicaSshTrust.ps1`
+revalidates **fresh** Hyper-V KVP data from the exact provisioned VM UUID,
+checks the independent Windows manifest nonce, compares a fresh network
+SSH ED25519 host key, and prepares an isolated OpenSSH trust file:
+
+`C:\Sentinel\E2E-WorkerReplica\sentinel-e2e-w02\trusted_known_hosts`
+
+The separate `Sentinel.SshTrust.psm1` refuses changed or duplicated entries,
+uses `FileMode.CreateNew` (no overwrite), and applies an explicit protected
+Windows ACL at file creation (current user, SYSTEM, Administrators).
+It refuses mismatched existing files, reparse-point targets, and inherited
+or unexpected allowed ACLs. It never writes to any user's global known_hosts,
+never adopts the provisional diagnostic SSH key, and never changes a VM.
+
+PowerShell command sequence:
+
+```powershell
+cd C:\Users\Orzu\projects\sentinel-ai-platform
+git switch feature/stage53-clean-bootstrap
+git pull --ff-only origin feature/stage53-clean-bootstrap
+
+# 1. READ-ONLY: fresh independent KVP and network identity comparison.
+.\infrastructure\level1\tools\Invoke-SentinelWorkerReplicaSshTrust.ps1 -Mode PLAN
+
+# 2. Approved write of ONE new protected, dedicated known_hosts file.
+.\infrastructure\level1\tools\Invoke-SentinelWorkerReplicaSshTrust.ps1 -Mode REGISTER -Approval REGISTER_DISPOSABLE_SENTINEL_W02_KVP_VERIFIED_SSH_HOST
+
+# 3. Read-only first authenticated SSH using ONLY the approved trust file.
+.\infrastructure\level1\tools\Invoke-SentinelWorkerReplicaSshTrust.ps1 -Mode ACCEPT
+```
+
+Expected markers:
+
+- `SENTINEL_SSH_TRUST_PLAN_READY` on the read-only plan.
+- `SENTINEL_SSH_HOST_TRUST_REGISTERED` when the protected trust file is created.
+- `SENTINEL_SSH_PINNED_AUTHENTICATION_PASS` only after strict host-key checking
+  and public-key user authentication execute the guest's `hostname` command.
+
+The acceptance step uses `ssh -F none`, `StrictHostKeyChecking=yes`,
+`UpdateHostKeys=no`, `HostKeyAlgorithms=ssh-ed25519`,
+`UserKnownHostsFile=<the isolated trust file>`, and
+`GlobalKnownHostsFile=/dev/null`. No SSH key is automatically accepted,
+and neither password auth nor an SSH agent is allowed. `-F none` prevents
+local SSH config files from altering this test. Fingerprint and VM-ID
+checks protect against network-only first-contact interception within
+the trusted Hyper-V host boundary, not against a compromised guest or host.
+
+**Partial failures block**. A pre-existing different trust key or an
+unexpected ACL is never overwritten or silently repaired. Stop and inspect
+rather than deleting the protected file or suppressing SSH key checking.
