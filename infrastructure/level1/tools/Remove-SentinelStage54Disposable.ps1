@@ -157,6 +157,10 @@ function Assert-CurrentSafety {
         # Verify exactly one GUID.vmcx and only GUID.vmrs/.vmgs plus an
         # optional GUID-named runtime directory with strictly permitted
         # contents. This is an offline, read-only layout validator.
+        $configDir = Join-Path $nested 'Virtual Machines'
+        if (-not (Test-Path -LiteralPath $configDir -PathType Container)) {
+            throw 'BLOCKED: nested VM configuration directory missing'
+        }
         $layoutStatus = Assert-SentinelHyperVConfigLayout -ConfigDirectory $configDir -ExpectedVMId $ExpectedVMId
         if ($layoutStatus -cne 'VERIFIED') {
             throw 'BLOCKED: exact Hyper-V VM UUID configuration layout not verified'
