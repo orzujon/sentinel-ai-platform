@@ -1,6 +1,7 @@
 """Stage 5.3 Linux KVP publisher synthetic-pool safety tests (never touch VMs)."""
 import base64
 import json
+import sys
 from pathlib import Path
 import sys
 import tempfile
@@ -28,6 +29,7 @@ class PublishGuestKvpTests(unittest.TestCase):
         self.assertEqual(record["schema"], 1)
         self.assertEqual(record["nonce"], "a" * 64)
 
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'KVP file locking requires Linux')
     def test_publish_to_disposable_pool_only_once(self):
         with tempfile.TemporaryDirectory() as tmp:
             pool = Path(tmp) / ".kvp_pool_1"
@@ -41,6 +43,7 @@ class PublishGuestKvpTests(unittest.TestCase):
                 publish(pool, value, allowed_path=False)
             self.assertEqual(saved, pool.read_bytes())
 
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'KVP file locking requires Linux')
     def test_bad_pool_cannot_be_modified(self):
         with tempfile.TemporaryDirectory() as tmp:
             pool = Path(tmp) / "pool"
@@ -50,6 +53,7 @@ class PublishGuestKvpTests(unittest.TestCase):
                 publish(pool, "data", allowed_path=False)
             self.assertEqual(pool.read_bytes(), before)
 
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'KVP file locking requires Linux')
     def test_symlink_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             real = Path(tmp) / "pool"
@@ -58,6 +62,14 @@ class PublishGuestKvpTests(unittest.TestCase):
             link.symlink_to(real)
             with self.assertRaises(TrustBlocked):
                 publish(link, "data", allowed_path=False)
+
+    @unittest.skipIf(sys.platform.startswith('linux'), 'Windows-specific failure gate')
+    def test_non_linux_publication_is_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pool = Path(tmp) / 'pool'
+            pool.touch()
+            with self.assertRaisesRegex(TrustBlocked, 'only inside a Linux guest'):
+                publish(pool, 'ignored', allowed_path=False)
 
     def test_wrong_host_or_nonce_rejected(self):
         with self.assertRaises(TrustBlocked):
