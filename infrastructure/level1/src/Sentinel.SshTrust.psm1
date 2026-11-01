@@ -3,7 +3,13 @@
 # No Hyper-V, SSH, known_hosts or guest mutations in these pure file primitives.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'Sentinel.KvpEvidence.psm1') -Force -ErrorAction Stop
+# Import Sentinel.KvpEvidence.psm1 from the entrypoint BEFORE this module.
+# Importing it again with -Force in nested module scope removes/replaces the
+# caller-visible exported functions in Windows PowerShell 5.1. Keep one owner
+# of shared imports and fail closed if the dependency is unavailable.
+if (-not (Get-Command Get-SentinelHostKeyFingerprint -CommandType Function -ErrorAction SilentlyContinue)) {
+    throw 'BLOCKED: import Sentinel.KvpEvidence.psm1 before Sentinel.SshTrust.psm1'
+}
 
 function Get-SentinelTrustedHostLine {
     [CmdletBinding()]
