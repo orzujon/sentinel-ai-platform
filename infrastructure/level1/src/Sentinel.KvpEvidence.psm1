@@ -52,37 +52,7 @@ function Assert-SentinelKvpIdentity {
     $node = [string]$ManifestEntry.node
     # Fresh disposable slots are approved only in the separate auto20..auto29
     # range. The existing Kubernetes nodes retain their historical pinning.
-    if ($node -cmatch '^sentinel-e2e-auto(2[0-9])
-    $manifestVM = [guid]::Empty
-    $actualVM = [guid]::Empty
-    if (-not [guid]::TryParse([string]$ManifestEntry.vmId,[ref]$manifestVM) -or
-        -not [guid]::TryParse($ActualVMId,[ref]$actualVM) -or
-        $manifestVM -ne $actualVM) { throw 'BLOCKED: Hyper-V VM ID does not match the independent provisioning manifest' }
-    if ([string]$ManifestEntry.nonce -cnotmatch '^[0-9a-f]{64}$') {
-        throw 'BLOCKED: missing or malformed provisioner nonce'
-    }
-    if ($GuestData.Length -gt 2048) { throw 'BLOCKED: oversized guest evidence' }
-    try { $guest = $GuestData | ConvertFrom-Json -ErrorAction Stop } catch { throw 'BLOCKED: malformed guest identity JSON' }
-    if ([int]$guest.schema -ne 1 -or
-        [string]$guest.node -cne $node -or [string]$guest.ip -cne $expected[$node] -or
-        [string]$guest.nonce -cne [string]$ManifestEntry.nonce) {
-        throw 'BLOCKED: guest evidence does not match provisioner-supplied node/IP/nonce'
-    }
-    $fingerprint = Get-SentinelHostKeyFingerprint -PublicKey ([string]$guest.publicKey)
-    if ([string]$guest.fingerprint -cne $fingerprint) { throw 'BLOCKED: inconsistent guest key fingerprint' }
-    return [pscustomobject]@{
-        result='EVIDENCE_MATCH'
-        node=$node
-        ip=$expected[$node]
-        vmId=$manifestVM.ToString()
-        fingerprint=$fingerprint
-        publicKey=[string]$guest.publicKey
-        # No trust is established by guest-published KVP evidence alone.
-        trusted=$false
-    }
-}
-Export-ModuleMember -Function ConvertFrom-SentinelKvpXml, Get-SentinelHostKeyFingerprint, Assert-SentinelKvpIdentity
-) {
+    if ($node -cmatch '^sentinel-e2e-auto(2[0-9])$') {
         $expected[$node] = '10.78.0.' + $Matches[1]
     }
     if (-not $expected.ContainsKey($node) -or [string]$ManifestEntry.ip -cne $expected[$node]) {
