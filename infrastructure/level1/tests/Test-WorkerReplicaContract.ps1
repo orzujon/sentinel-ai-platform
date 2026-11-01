@@ -36,6 +36,7 @@ foreach ($required in @(
     'ssh_pwauth: false',
     'ssh_deletekeys: true',
     'Add-VMNetworkAdapter',
+    'AutomaticCheckpointsEnabled',
     'Set-VMNetworkAdapter',
     'match:',
     'macaddress:',
