@@ -21,7 +21,7 @@ foreach ($must in @(
     "Get-VMDvdDrive",
     "Get-VMNetworkAdapter",
     "ReparsePoint",
-    "foreach ($other",
+    'foreach ($other',
     "Remove-VM -VM",
     "Remove-Item -LiteralPath",
     "Stage2ImageCacheUntouched",
