@@ -39,6 +39,25 @@ function Assert-AnsibleControllerReady {
     if ($LASTEXITCODE -ne 0) {
         throw 'BLOCKED: pre-existing WSL Ansible SSH private identity missing or unreadable'
     }
+    # A readable WSL key is not sufficient. It must be the SAME login key
+    # authorised by the provisioner inside the guest's cloud-init seed.
+    $winPublicPath = Join-Path $HOME '.ssh\id_ed25519.pub'
+    if (-not (Test-Path -LiteralPath $winPublicPath -PathType Leaf)) {
+        throw 'BLOCKED: Windows provisioning SSH login public key unavailable'
+    }
+    $winPublic = (Get-Content -LiteralPath $winPublicPath -Raw -Encoding ASCII).Trim()
+    $wslPublic = @(& wsl.exe -d Ubuntu-26.04 --exec ssh-keygen -y -P '' -f $WSLPrivateKey)
+    if ($LASTEXITCODE -ne 0 -or $wslPublic.Count -ne 1) {
+        throw 'BLOCKED: cannot independently derive WSL Ansible login public key'
+    }
+    $winFields = $winPublic -split '\s+'
+    $wslFields = $wslPublic[0].Trim() -split '\s+'
+    if ($winFields.Length -lt 2 -or $wslFields.Length -lt 2 -or
+        $winFields[0] -cne 'ssh-ed25519' -or
+        $wslFields[0] -cne $winFields[0] -or
+        $wslFields[1] -cne $winFields[1]) {
+        throw 'BLOCKED: WSL Ansible user private key does not match cloud-init authorised public login key'
+    }
     & wsl.exe -d Ubuntu-26.04 --exec ansible --version | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw 'BLOCKED: Ansible command unavailable in controller WSL Ubuntu-26.04'
