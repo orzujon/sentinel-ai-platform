@@ -150,6 +150,9 @@ jobs:
       - name: Verify Stage54 guarded cleanup approval, UUID binding and cleanup-first gate
         shell: powershell
         run: .\infrastructure\level1\tests\Test-Stage54Cleanup.ps1
+      - name: Smoke-test complete Stage54 cleanup PLAN on ephemeral fake Hyper-V VM layout
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-Stage54CleanupPlanSmoke.ps1
       - name: Verify worker-shaped two-NIC disposable VM and safety contracts offline
         shell: powershell
         run: .\infrastructure\level1\tests\Test-WorkerReplicaContract.ps1
