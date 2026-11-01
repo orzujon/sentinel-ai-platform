@@ -70,3 +70,62 @@ The `REGISTER` step creates **only** the protected dedicated `trusted_known_host
 **Security limitations:** VM/host/seed ownership is the basis of trust; Hyper-V guest KVP is not cryptographic proof of guest integrity. This is an isolated lab bootstrap, not a multi-tenant secure attestation mechanism. The root seed contains a nonce used for correlation, **not** a secret login credential. Guest clock, signed image provenance, firstboot APT trust and Windows host integrity still matter.
 
 **Early key-consistency gate:** before creating a VM, the PLAN/RUN controller verifies that the existing WSL Ansible private key derives the same ED25519 **login public key** injected into cloud-init from Windows. This prevents creating a VM that Windows SSH can access but Ansible cannot. Private key material stays on its original system; only a derived public key is compared. An encrypted WSL private key that cannot be checked noninteractively blocks the plan.
+
+
+## Mandatory cleanup before creating another disposable VM
+
+Stage54 PLAN and RUN now block while any prior disposable lab VM remains: 
+`sentinel-e2e-w02`, `sentinel-e2e-ssh01` or any `sentinel-e2e-auto20..29`.
+The preflight also refuses stale disposable storage directories. **No VM or
+disk is automatically removed.** Use a separately approved PLAN/REMOVE.
+
+Inventory old lab VMs (read-only):
+
+```powershell
+Get-VM | Where-Object { $_.Name -match '^sentinel-e2e-' } | Select-Object Name,Id,State
+```
+
+Previously verified **w02**, VM UUID `7ce061eb-ac7a-43d6-bddb-a22070d2c6f9`:
+
+```powershell
+# Read-only: prove exact UUID, VHDX, ISO, NICs and exclusive folder ownership.
+.\infrastructure\level1\tools\Remove-SentinelStage54Disposable.ps1 -Mode PLAN -Target w02 -ExpectedVMId '7ce061eb-ac7a-43d6-bddb-a22070d2c6f9'
+
+# DESTRUCTIVE: only after reading and approving PLAN's precise deletion report.
+.\infrastructure\level1\tools\Remove-SentinelStage54Disposable.ps1 -Mode REMOVE -Target w02 -ExpectedVMId '7ce061eb-ac7a-43d6-bddb-a22070d2c6f9' -Approval REMOVE_EXACT_SENTINEL_E2E_W02
+```
+
+Cleanup targets the requested VM and its own files only; it refuses a wrong
+VM UUID, any checkpoints, AVHDX/differencing disks, symlinks, unexpected
+attachments, or foreign VMs referencing the folder. Running guests are
+asked to shut down gracefully; failure blocks rather than forcing power-off.
+Neither the existing Kubernetes VMs, Hyper-V switches, nor Stage 2 cache
+are modified. Remove only after reviewing the exact UUID and path.
+
+To clean a previously created Stage54 slot, supply its actual UUID from
+`Get-VM` and the slot. Example for slot 20:
+
+```powershell
+$vmId = (Get-VM -Name 'sentinel-e2e-auto20').Id
+.\infrastructure\level1\tools\Remove-SentinelStage54Disposable.ps1 -Mode PLAN -Target stage54 -Slot 20 -ExpectedVMId $vmId
+# Destructive; only after confirming PLAN:
+.\infrastructure\level1\tools\Remove-SentinelStage54Disposable.ps1 -Mode REMOVE -Target stage54 -Slot 20 -ExpectedVMId $vmId -Approval REMOVE_EXACT_SENTINEL_STAGE54_DISPOSABLE
+```
+
+Legacy `sentinel-e2e-ssh01` has its own exact-UUID
+`Remove-SentinelDisposableE2E.ps1` cleanup tool. If the VM was already
+unregistered but files remain, Stage54's guarded cleanup refuses to infer
+ownership and will not delete orphaned data automatically.
+
+## WSL SSH login-key preflight correction
+
+OpenSSH `ssh-keygen -y` supports `-f` but not `-P`. The corrected key
+comparison uses a bounded, noninteractive WSL command:
+
+```powershell
+wsl.exe -d Ubuntu-26.04 --exec timeout 8s ssh-keygen -y -f /home/orzu/.ssh/id_ed25519
+```
+
+It checks that the WSL Ansible private key derives the same ED25519 public
+login key cloud-init authorises. No private key is copied. A mismatch blocks
+the plan before a VM can be created.
