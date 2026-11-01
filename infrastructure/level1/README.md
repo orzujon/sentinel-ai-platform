@@ -267,3 +267,22 @@ challenge protocol remain to be built and tested on a separate disposable VM.
 This check leaves Step 40 marked incomplete.
 
 References: <https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/integration-services-data-exchange> and <https://manpages.ubuntu.com/manpages/noble/man8/hv_kvp_daemon.8.html>.
+
+
+### Stage 5.3 — Pinned Hyper-V KVP daemon package planning
+
+Read-only APT evidence from Ubuntu 26.04 (2026-11-01) shows
+`linux-cloud-tools-common` **not installed** and current candidate
+`7.0.0-42.42` from `resolute-updates/main`. This package supplies
+`hv-kvp-daemon.service` (hyphenated service name, not
+`hv_kvp_daemon.service`) and the `hv_kvp_daemon` executable.
+
+`infrastructure/ansible/playbooks/35-hyperv-kvp-package-plan.yml` adds
+fresh-only, **read-only** preflight guards for two pinned sandbox Ubuntu
+26.04 nodes. Requires controller-injected `sentinel_fresh_bootstrap: true`,
+refuses existing Kubernetes markers, inspects installed state, and checks
+that the exact APT candidate matches `7.0.0-42.42`. It does **not** update
+APT, install packages or change running services. The Stage 5.3 orchestration
+still needs an authenticated fresh-VM-only execution path, verified
+package/service installation, and host-key KVP publisher. **Do not execute
+fresh-only steps on the existing Kubernetes cluster.**
