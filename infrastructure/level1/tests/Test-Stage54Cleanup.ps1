@@ -126,7 +126,7 @@ foreach ($guard in @(
 }
 
 $fixture = Join-Path $env:TEMP ('sentinel-stage54-layout-' + [guid]::NewGuid().ToString('N'))
-[void](New-Item -ItemType Directory -LiteralPath $fixture -ErrorAction Stop)
+[void](New-Item -ItemType Directory -Path $fixture -ErrorAction Stop)
 try {
     $vmId = [guid]::NewGuid()
     $uuid = $vmId.ToString('D').ToUpperInvariant()
@@ -137,7 +137,7 @@ try {
         [IO.File]::WriteAllBytes($path,[byte[]](1,2,3))
     }
     $runtime = Join-Path $fixture $uuid
-    [void](New-Item -ItemType Directory -LiteralPath $runtime -ErrorAction Stop)
+    [void](New-Item -ItemType Directory -Path $runtime -ErrorAction Stop)
     if ((Assert-SentinelHyperVConfigLayout -ConfigDirectory $fixture -ExpectedVMId $vmId) -cne 'VERIFIED') {
         throw 'BLOCKED: exact GUID-matching empty runtime folder should be accepted'
     }
@@ -155,7 +155,7 @@ try {
     }
     [IO.File]::Delete($foreign)
     $foreignDir = Join-Path $fixture ([guid]::NewGuid().ToString('D'))
-    [void](New-Item -ItemType Directory -LiteralPath $foreignDir -ErrorAction Stop)
+    [void](New-Item -ItemType Directory -Path $foreignDir -ErrorAction Stop)
     Expect-Blocked { Assert-SentinelHyperVConfigLayout -ConfigDirectory $fixture -ExpectedVMId $vmId }
     Remove-Item -LiteralPath $foreignDir -Recurse -Force
     $unexpectedFile = Join-Path $fixture 'config-note.txt'
