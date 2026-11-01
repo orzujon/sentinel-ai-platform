@@ -166,6 +166,11 @@ Invoke-Helper -arguments @('disk',(ConvertTo-SentinelWslMountPath $imageFile),(C
 Resize-VHD -Path $disk -SizeBytes (24GB) -ErrorAction Stop
 Invoke-Helper -arguments @('seed',(ConvertTo-SentinelWslMountPath $userPath),(ConvertTo-SentinelWslMountPath $metaPath),(ConvertTo-SentinelWslMountPath $netPath),(ConvertTo-SentinelWslMountPath $seed))
 $vm = New-VM -Name $name -Generation 2 -Path $folder -VHDPath $disk -SwitchName 'Default Switch' -MemoryStartupBytes (2GB) -ErrorAction Stop
+# This is a reproducible disposable test; don't auto-create differencing AVHDX disks.
+Set-VM -Name $name -AutomaticCheckpointsEnabled $false -ErrorAction Stop
+if ((Get-VM -Name $name -ErrorAction Stop).AutomaticCheckpointsEnabled) {
+    throw 'BLOCKED: automatic Hyper-V checkpoints remain enabled; refuse first boot'
+}
 Set-VMMemory -VMName $name -DynamicMemoryEnabled $false -StartupBytes (2GB)
 Set-VMProcessor -VMName $name -Count 2
 # Same Hyper-V NIC ordering as Stage 3. Never create or modify switches.
