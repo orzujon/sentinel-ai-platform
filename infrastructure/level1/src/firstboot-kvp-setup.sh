@@ -22,7 +22,11 @@ echo "FIRSTBOOT_KVP_PACKAGE_PLAN: kernel=$kernel"
 apt-get update -o Acquire::Retries=1 -o Acquire::http::Timeout=20
 packages=(linux-cloud-tools-common "linux-cloud-tools-${generic_base}" "linux-cloud-tools-${kernel}")
 for package in "${packages[@]}"; do
-  candidate="$(apt-cache policy "$package" | awk '/Candidate:/ {print $2; exit}')"
+  # Do not exit awk early under pipefail: apt-cache may receive SIGPIPE
+  # and abort cloud-init despite supplying a valid Candidate.
+  policy="$(apt-cache policy "$package")"
+  candidate="$(printf '%s\n' "$policy" | awk '$1=="Candidate:" {print $2}')"
+  echo "FIRSTBOOT_KVP_CANDIDATE: $package=$candidate"
   [[ -n "$candidate" && "$candidate" != "(none)" ]] ||
     { echo "BLOCKED: missing signed Ubuntu package candidate for $package" >&2; exit 2; }
 done
