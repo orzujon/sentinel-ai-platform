@@ -46,7 +46,9 @@ function Assert-AnsibleControllerReady {
         throw 'BLOCKED: Windows provisioning SSH login public key unavailable'
     }
     $winPublic = (Get-Content -LiteralPath $winPublicPath -Raw -Encoding ASCII).Trim()
-    $wslPublic = @(& wsl.exe -d Ubuntu-26.04 --exec ssh-keygen -y -P '' -f $WSLPrivateKey)
+    # ssh-keygen -y accepts -f, but NOT -P. Bound execution avoids a
+    # passphrase prompt hanging an unattended VM creation preflight.
+    $wslPublic = @(& wsl.exe -d Ubuntu-26.04 --exec timeout 8s ssh-keygen -y -f $WSLPrivateKey)
     if ($LASTEXITCODE -ne 0 -or $wslPublic.Count -ne 1) {
         throw 'BLOCKED: cannot independently derive WSL Ansible login public key'
     }
