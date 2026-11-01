@@ -1,15 +1,16 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Stage 5.3 disposable worker KVP PLAN/APPLY with one explicit approval gate.
+  Stage 5.3 disposable worker KVP plan/apply and kernel-specific recovery.
 .DESCRIPTION
-  PLAN is read-only on Windows and Linux. APPLY installs exactly five reviewed
-  Ubuntu package versions after a fresh simulation, then starts the KVP daemon.
+  PLAN/APPLY handle first install of five reviewed Ubuntu packages.
+  KERNEL_PLAN/KERNEL_APPLY separately recover the already-installed common launcher
+  by adding two exact packages for the running kernel. Each apply has its own gate.
   SSH trust is provisional and diagnostic only, not production attestation.
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('PLAN','APPLY')][string]$Mode = 'PLAN',
+    [ValidateSet('PLAN','APPLY','KERNEL_PLAN','KERNEL_APPLY')][string]$Mode = 'PLAN',
     [string]$Approval
 )
 Set-StrictMode -Version Latest
@@ -20,11 +21,19 @@ $name = 'sentinel-e2e-w02'
 $folder = 'C:\Sentinel\E2E-WorkerReplica\sentinel-e2e-w02'
 $manifestFile = Join-Path $folder 'provisioning.json'
 $knownHosts = Join-Path $folder 'diagnostic_known_hosts'
-$source = Join-Path $PSScriptRoot '..\src\worker-replica-kvp.sh'
+$sourceFile = if ($Mode -in @('KERNEL_PLAN','KERNEL_APPLY')) {
+    'worker-replica-kvp-kernel-recovery.sh'
+} else {
+    'worker-replica-kvp.sh'
+}
+$source = Join-Path (Join-Path $PSScriptRoot '..\src') $sourceFile
 
 # Approval must be checked before any network interaction or guest mutation.
 if ($Mode -eq 'APPLY' -and $Approval -cne 'INSTALL_DISPOSABLE_SENTINEL_W02_KVP_FIVE_PACKAGES') {
     throw 'BLOCKED: explicit reviewed five-package disposable VM approval required'
+}
+if ($Mode -eq 'KERNEL_APPLY' -and $Approval -cne 'INSTALL_DISPOSABLE_SENTINEL_W02_MATCHING_KERNEL_CLOUD_TOOLS') {
+    throw 'BLOCKED: explicit reviewed matching-kernel cloud tools approval required'
 }
 $vm = @(Get-VM -Name $name -ErrorAction Stop)
 if ($vm.Count -ne 1 -or $vm[0].Id -ne $expectedId -or $vm[0].State -ne 'Running') {
@@ -68,8 +77,8 @@ if (-not (Test-Path -LiteralPath $identity -PathType Leaf)) {
 # Encode UTF-8 Linux script before piping it, avoiding CRLF shell failures.
 $linux = Get-Content -LiteralPath $source -Raw -Encoding UTF8
 $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($linux))
-$guestMode = if ($Mode -eq 'APPLY') { 'apply' } else { 'plan' }
-$runner = if ($Mode -eq 'APPLY') { 'sudo -n bash -s --' } else { 'bash -s --' }
+$guestMode = if ($Mode -in @('APPLY','KERNEL_APPLY')) { 'apply' } else { 'plan' }
+$runner = if ($Mode -in @('APPLY','KERNEL_APPLY')) { 'sudo -n bash -s --' } else { 'bash -s --' }
 $remote = "printf '%s' '$encoded' | base64 -d | $runner $guestMode"
 $sshArgs = @(
     '-i', $identity,
