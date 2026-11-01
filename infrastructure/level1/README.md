@@ -238,3 +238,32 @@ provisioning-time VM identity/freshness binding, followed by offline
 comparison and private trusted-host registration.
 
 Reference: https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/integration-services-data-exchange
+
+
+### Stage 5.3 guest KVP prerequisites — safe read-only discovery
+
+The host-side probe confirmed that both working guests expose Hyper-V Data
+Exchange. The next **non-mutating** check is to inspect how Ubuntu exposes
+the daemon and Linux KVP pool. Microsoft documents the guest pool 1 under
+`/var/lib/hyperv`, while Ubuntu's `hv_kvp_daemon` manpage documents
+`/var/opt/hyperv`; Sentinel checks both and refuses ambiguity instead of
+writing binary data to an unknown pool.
+
+Copy/inspect `infrastructure/ansible/inspect_guest_hyperv_kvp.py` in your
+Linux guest and run `python3 inspect_guest_hyperv_kvp.py`, or invoke the
+following from an SSH session already authenticated to an existing VM:
+
+```bash
+systemctl is-active hv-kvp-daemon.service || true
+systemctl is-active hypervkvpd.service || true
+ls -l /var/opt/hyperv/.kvp_pool_1 /var/lib/hyperv/.kvp_pool_1 2>/dev/null || true
+ls -l /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+The guest-side probe **reads metadata only**. Do not directly append text to
+KVP pool files: they contain binary fixed-size records, and careless writes
+can damage exchange. A production-ready guest publisher and VM-identity/fresh
+challenge protocol remain to be built and tested on a separate disposable VM.
+This check leaves Step 40 marked incomplete.
+
+References: <https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/integration-services-data-exchange> and <https://manpages.ubuntu.com/manpages/noble/man8/hv_kvp_daemon.8.html>.
