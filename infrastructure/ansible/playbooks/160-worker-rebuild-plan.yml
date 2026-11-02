@@ -58,11 +58,11 @@
 
     - name: Parse read-only Kubernetes inventory
       ansible.builtin.set_fact:
-        sentinel_nodes: "{{ (sentinel_node_data.stdout | from_json).items }}"
-        sentinel_pods: "{{ (sentinel_pod_data.stdout | from_json).items }}"
-        sentinel_pvs: "{{ (sentinel_pv_data.stdout | from_json).items }}"
-        sentinel_pvcs: "{{ (sentinel_pvc_data.stdout | from_json).items }}"
-        sentinel_pdbs: "{{ (sentinel_pdb_data.stdout | from_json).items }}"
+        sentinel_nodes: "{{ (sentinel_node_data.stdout | from_json)['items'] }}"
+        sentinel_pods: "{{ (sentinel_pod_data.stdout | from_json)['items'] }}"
+        sentinel_pvs: "{{ (sentinel_pv_data.stdout | from_json)['items'] }}"
+        sentinel_pvcs: "{{ (sentinel_pvc_data.stdout | from_json)['items'] }}"
+        sentinel_pdbs: "{{ (sentinel_pdb_data.stdout | from_json)['items'] }}"
 
     - name: Build worker and storage risk observations
       ansible.builtin.set_fact:
