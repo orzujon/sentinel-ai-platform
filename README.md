@@ -1,5 +1,12 @@
 # Sentinel AI Platform
 
+**AI operations and infrastructure engineering portfolio project** — local GPU-backed incident investigation, evidence-bound runbook retrieval, evaluation, and guarded Kubernetes lab provisioning.
+
+> **Looking for the infrastructure side?** Start with [Level 1 Hyper-V / Ubuntu provisioning](infrastructure/level1/README.md), [Ansible and Kubernetes reconciliation](infrastructure/ansible/README.md), and the [platform architecture](infrastructure/level1/docs/ARCHITECTURE.md). These are evolving lab workflows, not a finished one-command production installer.
+
+**Explore:** [API and RAG](#current-architecture) · [Synthetic evaluations](#day-2-labelled-evaluation-suite) · [Infrastructure automation](infrastructure/level1/README.md) · [Tests](#tests) · [Roadmap](#roadmap)
+
+
 **GPU-backed, read-only AI incident investigation lab with measured operational reliability and a curated runbook retrieval prototype.**
 
 > **Lab only.** This project processes *synthetic* incident reports. Its local API is unauthenticated; do not expose it to the public internet or submit sensitive data. Generated recommendations are not verified diagnoses.
