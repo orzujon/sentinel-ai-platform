@@ -69,6 +69,10 @@ jobs:
         run: python -m unittest discover -s infrastructure/level1/tests -p 'test_worker_replica_kvp_kernel_recovery.py' -v
       - name: Test disposable KVP guest-to-host SSH public key publisher
         run: python -m unittest discover -s infrastructure/level1/tests -p 'test_worker_replica_kvp_publisher.py' -v
+      - name: Verify fresh firstboot KVP shell script syntax
+        run: bash -n infrastructure/level1/src/firstboot-kvp-setup.sh
+      - name: Test Stage54 self-contained firstboot KVP publisher
+        run: python -m unittest discover -s infrastructure/level1/tests -p 'test_firstboot_kvp.py' -v
       - name: Execute Level 1 static package tests
         run: python -m unittest discover -s infrastructure/level1/tests -p 'test_*.py' -v
       - name: Demonstrate read-only sample plan
@@ -140,6 +144,15 @@ jobs:
       - name: Validate KVP-pinned SSH trust registration and Windows ACL protection
         shell: powershell
         run: .\infrastructure\level1\tests\Test-WorkerReplicaSshTrust.ps1
+      - name: Verify reusable Stage54 no-TOFU fresh VM to Ansible bootstrap contract
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-Stage54.ps1
+      - name: Verify Stage54 guarded cleanup approval, UUID binding and cleanup-first gate
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-Stage54Cleanup.ps1
+      - name: Smoke-test complete Stage54 cleanup PLAN on ephemeral fake Hyper-V VM layout
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-Stage54CleanupPlanSmoke.ps1
       - name: Verify worker-shaped two-NIC disposable VM and safety contracts offline
         shell: powershell
         run: .\infrastructure\level1\tests\Test-WorkerReplicaContract.ps1

@@ -18,8 +18,8 @@ function Get-SentinelTrustedHostLine {
         [Parameter(Mandatory)][string]$PublicKey,
         [Parameter(Mandatory)][string]$Fingerprint
     )
-    if ($IPAddress -cne '10.78.0.12') {
-        throw 'BLOCKED: trusted host entry must target only disposable IP 10.78.0.12'
+    if ($IPAddress -cnotmatch '^10\.78\.0\.(12|2[0-9])$') {
+        throw 'BLOCKED: trusted host entry must target approved disposable slot only'
     }
     $calculated = Get-SentinelHostKeyFingerprint -PublicKey $PublicKey
     if ($calculated -cne $Fingerprint) {
@@ -71,7 +71,7 @@ function Get-SentinelTrustStoreState {
         [Parameter(Mandatory)][string]$ExpectedLine
     )
     Assert-SentinelTrustStoreDirectory -Path $Path
-    if ($ExpectedLine -cnotmatch '^10\.78\.0\.12 ssh-ed25519 [A-Za-z0-9+/]+={0,2}$') {
+    if ($ExpectedLine -cnotmatch '^10\.78\.0\.(12|2[0-9]) ssh-ed25519 [A-Za-z0-9+/]+={0,2}$') {
         throw 'BLOCKED: unexpected trusted host line'
     }
     if (-not [IO.File]::Exists($Path)) {
