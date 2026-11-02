@@ -61,6 +61,8 @@ jobs:
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/140-cluster-validate.yml
       - name: Validate Stage 4.4.1 approved active networking playbook
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/150-active-network.yml
+      - name: Validate Stage 5.5 read-only worker workload and storage audit playbook
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/160-worker-rebuild-plan.yml
       - name: Compile Python management runner
         run: python -m py_compile infrastructure/ansible/run_readiness.py infrastructure/ansible/reconcile.py
       - name: Test exact disposable KVP five-package transaction gate
