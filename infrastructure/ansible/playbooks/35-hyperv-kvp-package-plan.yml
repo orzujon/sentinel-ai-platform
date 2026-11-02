@@ -1,0 +1,66 @@
+---
+# Stage 5.3 fresh-only Hyper-V KVP userspace prerequisites.
+# This playbook is READ ONLY: no apt update, installation or service changes.
+- name: Discover pinned Hyper-V guest KVP package candidate on both fresh guests
+  hosts: sentinel_sandbox
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  vars:
+    sentinel_kvp_package: linux-cloud-tools-common
+    sentinel_kvp_candidate: "7.0.0-42.42"
+  tasks:
+    - name: Require supported Ubuntu and management-injected fresh-only flag
+      ansible.builtin.assert:
+        that:
+          - sentinel_fresh_bootstrap | default(false) | bool
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '26.04'
+          - ansible_facts['architecture'] == 'x86_64'
+          - inventory_hostname in ['sentinel-l1-cp01', 'sentinel-l1-w01']
+        fail_msg: "BLOCKED: fresh-only Ubuntu 26.04 sandbox inventory required"
+
+    - name: Inspect Kubernetes state markers without modifying the guest
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /etc/kubernetes/admin.conf
+        - /etc/kubernetes/kubelet.conf
+        - /var/lib/kubelet/config.yaml
+      register: sentinel_kvp_existing_cluster
+
+    - name: Refuse to run the fresh-only plan on a Kubernetes node
+      ansible.builtin.assert:
+        that:
+          - not (sentinel_kvp_existing_cluster.results | map(attribute='stat.exists') | select | list)
+        fail_msg: "BLOCKED: existing Kubernetes state; never apply bootstrap KVP changes to live nodes"
+
+    - name: Inspect package candidate and apt source evidence
+      ansible.builtin.command:
+        argv: [apt-cache, policy, linux-cloud-tools-common]
+      register: sentinel_kvp_apt_policy
+      changed_when: false
+
+    - name: Check pinned package candidate
+      ansible.builtin.assert:
+        that:
+          - "'Candidate: ' ~ sentinel_kvp_candidate in sentinel_kvp_apt_policy.stdout"
+        fail_msg: "BLOCKED: pinned KVP package revision does not match APT candidate"
+
+    - name: Check installed package revision without mutation
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, '-f=${Version}', linux-cloud-tools-common]
+      register: sentinel_kvp_dpkg
+      changed_when: false
+      failed_when: false
+
+    - name: Refuse unreviewed package revisions
+      ansible.builtin.assert:
+        that:
+          - sentinel_kvp_dpkg.rc != 0 or sentinel_kvp_dpkg.stdout == sentinel_kvp_candidate
+        fail_msg: "BLOCKED: KVP package already installed at a different revision"
+
+    - name: Explain the next approval step
+      ansible.builtin.debug:
+        msg: "KVP_PRECHECK_PASS: read-only candidate verified; no installation performed"
