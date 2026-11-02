@@ -156,6 +156,9 @@ jobs:
       - name: Verify worker-shaped two-NIC disposable VM and safety contracts offline
         shell: powershell
         run: .\infrastructure\level1\tests\Test-WorkerReplicaContract.ps1
+      - name: Verify Stage55 read-only worker rebuild plan remains fail-closed
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-Stage55Plan.ps1
       - name: Validate disposable VM provisioner syntax and isolation contract
         shell: powershell
         run: |
