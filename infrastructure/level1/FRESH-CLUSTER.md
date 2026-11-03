@@ -138,25 +138,68 @@ Individual steps are available for review and diagnosed continuation:
 CREATE also needs the image path/hash. CNI also needs the reviewed upstream
 Flannel hash. All mutation approvals are checked before Hyper-V/WSL access.
 
-## Follow-up: configuration-driven artifact selection
+## Profile-based artifact selection (feature branch; operator approval pending)
 
-Operator request, 3 November 2026: do not require copying the Ubuntu image
-path and SHA256 into every command. This is a future CLI improvement, not
-implemented in the current entrypoints.
+The operator entrypoint now selects the image and Flannel manifest using a reviewed
+**profile lock**, rather than accepting repeated image paths, image SHA256 or
+upstream Flannel SHA256 flags:
 
-- Resolve a named environment/profile to a reviewed, version-controlled image
-  catalog entry containing the exact build, source and SHA256; derive its local
-  cache path from that entry.
-- Load the reviewed Flannel version and upstream SHA256 from its release lock
-  as well, rather than requiring another copied checksum argument.
-- Keep artifact verification mandatory on use. Never silently select the
-  latest image, trust a checksum calculated from an unapproved file, or replace
-  a reviewed pin after a mismatch.
-- PLAN should display resolved versions, pins and configuration revision for
-  review. Missing/unapproved entries and mismatches must block before creation.
-- Acceptance: normal PLAN/BOOTSTRAP commands need only a profile and the
-  applicable execution approval, with no repeated paths or checksums. Retain
-  explicit overrides only as a separately reviewed advanced workflow.
+- Profile: `sentinel-fresh-cluster-v1`
+- Lock: `infrastructure/level1/config/fresh-artifacts.lock.json`
+- Image: Ubuntu 26.04 build `20261016`, SHA256
+  `5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5`
+- Flannel: `v0.28.10`, upstream SHA256
+  `393bdbce53eb50c8eb97dd513b218518b7d6e7985dc7b889be956e112a711084`
+
+**Important provenance limit:** the repository's existing
+`infrastructure/image-catalog/candidates/ubuntu-26.04-20261016.json` is
+explicitly `candidate`, `deploymentPermitted=false`. It records a
+prior operator-reported signed checksum verification, but not an independently
+signed production approval. Consequently this new lock is deliberately
+`pending-review`. The resolver will not authorize PLAN, CREATE, CNI or
+BOOTSTRAP for this profile until a separate reviewed PR explicitly attributes
+the approval. Changing a SHA to the hash of whatever is on disk is forbidden.
+
+An offline read-only inspection can be run even with existing cluster VMs:
+
+```powershell
+cd C:\Sentinel\fresh-cluster-development
+.\infrastructure\level1\tools\Invoke-SentinelFreshCluster.ps1 -Stage ARTIFACTS -Profile sentinel-fresh-cluster-v1
+```
+
+`ARTIFACTS` parses the lock and prints profile, lock-file SHA256, image
+reference/source and Flannel release/digests. It does not access Hyper-V,
+start WSL, download files or hash the local image. This is **metadata inspection
+only**, not proof that a deployed artifact is approved or present locally.
+
+After a **separately reviewed profile promotion** (not performed by this PR),
+`PLAN` also verifies the entire SHA256-named Stage2 cached image and its
+sidecar (`sourceUrl`, `buildId`, `sha256`, `sizeBytes`). File symlinks,
+hash mismatches, unsupported URLs and unexpected schema block. CREATE and
+BOOTSTRAP reverify image cache before use and the existing VM creator independently
+rehashes it. CNI retrieves and hashes the upstream Flannel bytes before
+rendering. Checksum integrity alone does not prove publisher authenticity;
+review of the original Canonical signature evidence remains separate.
+
+Future *brand-new* unoccupied environments can use:
+
+```powershell
+.\infrastructure\level1\tools\Invoke-SentinelFreshCluster.ps1 -Stage PLAN -Profile sentinel-fresh-cluster-v1
+# Only after approval, with an independently clean target and successful PLAN:
+# .\infrastructure\level1\tools\Invoke-SentinelFreshCluster.ps1 -Stage BOOTSTRAP -Profile sentinel-fresh-cluster-v1 -Approval FRESH_BOOTSTRAP
+```
+
+**DO NOT run BOOTSTRAP against the existing `sentinel-fresh-*` pair.**
+PLAN is a creation preflight; it rejects occupied names/paths, and cannot
+serve as an existing-cluster health check. Use `-Stage VERIFY` to inspect
+the accepted cluster without deploying changes. BOOTSTRAP is not a resume
+or rebuild operation. `ARTIFACTS` is the appropriate new action to inspect
+resolved pins on the current, already provisioned machine.
+
+Current limitations of this change: it does not bind every Ansible audit to the
+immutable Git commit; it does not implement a restart/persistence test,
+safe continuation planner or automatic artifact-review workflow. Those remain
+separate Level 1 engineering tasks.
 
 ## Failure and rerun semantics
 
