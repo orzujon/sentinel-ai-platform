@@ -1,0 +1,83 @@
+---
+# Read-only identity and network gates, executed before EVERY fresh-cluster stage.
+- name: Bind both new guests to independently verified firstboot identities
+  hosts: sentinel_sandbox
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Require exactly the new cluster inventory
+      ansible.builtin.assert:
+        that:
+          - groups['sentinel_sandbox'] | sort == ['sentinel-fresh-cp01', 'sentinel-fresh-w01']
+          - groups['sentinel_control_plane'] == ['sentinel-fresh-cp01']
+          - groups['sentinel_workers'] == ['sentinel-fresh-w01']
+          - ansible_host == ('10.78.0.30' if inventory_hostname == 'sentinel-fresh-cp01' else '10.78.0.31')
+          - sentinel_fresh_stage in ['readiness', 'baseline', 'repository', 'packages', 'init', 'cni', 'join', 'verify', 'network-test']
+    - name: Wait a bounded time for firstboot completion after KVP publication
+      ansible.builtin.command:
+        argv: [timeout, '600', cloud-init, status, --wait]
+      changed_when: false
+    - name: Read root-owned firstboot identity
+      ansible.builtin.slurp:
+        src: /etc/sentinel/bootstrap.json
+      register: fresh_seed
+      no_log: true
+    - name: Require independently pinned nonce and node identity
+      ansible.builtin.assert:
+        that:
+          - (fresh_seed.content | b64decode | from_json).schema == 3
+          - (fresh_seed.content | b64decode | from_json).node == inventory_hostname
+          - (fresh_seed.content | b64decode | from_json).ip == ansible_host
+          - (fresh_seed.content | b64decode | from_json).nonce == sentinel_expected_nonce
+      no_log: true
+    - name: Read guest routes before cluster network installation
+      ansible.builtin.command:
+        argv: [ip, -j, -4, route, show, table, all]
+      register: fresh_routes
+      changed_when: false
+      when: sentinel_fresh_stage in ['readiness', 'baseline', 'repository', 'packages', 'init']
+    - name: Reject existing guest route overlap before first cluster installation
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import ipaddress,json,sys
+            targets=[ipaddress.ip_network('10.245.0.0/16'),ipaddress.ip_network('10.112.0.0/16')]
+            for row in json.load(sys.stdin):
+                dst=row.get('dst','default')
+                if dst == 'default': continue
+                network=ipaddress.ip_network(dst,strict=False)
+                if any(network.overlaps(t) for t in targets):
+                    raise SystemExit('BLOCKED: guest route overlaps new cluster CIDRs')
+        stdin: "{{ fresh_routes.stdout }}"
+      changed_when: false
+      when: sentinel_fresh_stage in ['readiness', 'baseline', 'repository', 'packages', 'init']
+
+- name: Require a new-cluster API before any post-init Kubernetes operation
+  hosts: sentinel_control_plane
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Read cluster node identities through its explicit kubeconfig
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, nodes, -o, json]
+      register: fresh_nodes
+      changed_when: false
+      when: sentinel_fresh_stage in ['cni', 'join', 'verify', 'network-test']
+    - name: Read recorded kubeadm network configuration
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, -n, kube-system, get, configmap, kubeadm-config, -o, json]
+      register: fresh_cluster_config
+      changed_when: false
+      when: sentinel_fresh_stage in ['cni', 'join', 'verify', 'network-test']
+    - name: Reject old clusters and unexpected node registrations
+      ansible.builtin.assert:
+        that:
+          - "'sentinel-fresh-cp01' in ((fresh_nodes.stdout | from_json)['items'] | map(attribute='metadata.name') | list)"
+          - "((fresh_nodes.stdout | from_json)['items'] | map(attribute='metadata.name') | list | difference(['sentinel-fresh-cp01', 'sentinel-fresh-w01'])) | length == 0"
+          - "((fresh_cluster_config.stdout | from_json).data.ClusterConfiguration | from_yaml).networking.podSubnet == '10.245.0.0/16'"
+          - "((fresh_cluster_config.stdout | from_json).data.ClusterConfiguration | from_yaml).networking.serviceSubnet == '10.112.0.0/16'"
+      when: sentinel_fresh_stage in ['cni', 'join', 'verify', 'network-test']

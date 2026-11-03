@@ -42,7 +42,8 @@ function Assert-SentinelKvpIdentity {
     param(
         [Parameter(Mandatory)][object]$ManifestEntry,
         [Parameter(Mandatory)][string]$ActualVMId,
-        [Parameter(Mandatory)][string]$GuestData
+        [Parameter(Mandatory)][string]$GuestData,
+        [switch]$FreshCluster
     )
     $expected = @{
         'sentinel-l1-cp01'='10.78.0.10'
@@ -55,6 +56,9 @@ function Assert-SentinelKvpIdentity {
     if ($node -cmatch '^sentinel-e2e-auto(2[0-9])$') {
         $expected[$node] = '10.78.0.' + $Matches[1]
     }
+    if ($FreshCluster) {
+        $expected = @{'sentinel-fresh-cp01'='10.78.0.30'; 'sentinel-fresh-w01'='10.78.0.31'}
+    }
     if (-not $expected.ContainsKey($node) -or [string]$ManifestEntry.ip -cne $expected[$node]) {
         throw 'BLOCKED: unknown or unpinned guest network identity'
     }
@@ -62,6 +66,7 @@ function Assert-SentinelKvpIdentity {
     $actualVM = [guid]::Empty
     if (-not [guid]::TryParse([string]$ManifestEntry.vmId,[ref]$manifestVM) -or
         -not [guid]::TryParse($ActualVMId,[ref]$actualVM) -or
+        $manifestVM -eq [guid]::Empty -or
         $manifestVM -ne $actualVM) { throw 'BLOCKED: Hyper-V VM ID does not match the independent provisioning manifest' }
     if ([string]$ManifestEntry.nonce -cnotmatch '^[0-9a-f]{64}$') {
         throw 'BLOCKED: missing or malformed provisioner nonce'

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import fcntl
 import hashlib
 import json
 import os
@@ -40,14 +39,19 @@ class Blocked(ValueError):
 def validate_manifest(raw: dict) -> tuple[str, str, str]:
     if not isinstance(raw, dict) or set(raw) != {"schema", "node", "ip", "nonce"}:
         raise Blocked("invalid fresh-VM bootstrap schema")
-    if type(raw["schema"]) is not int or raw["schema"] != 2:
+    if type(raw["schema"]) is not int or raw["schema"] not in (2, 3):
         raise Blocked("unsupported bootstrap schema")
     name = raw["node"]
     if not isinstance(name, str):
         raise Blocked("invalid node")
     match = NAME_RE.fullmatch(name)
-    if not match or raw["ip"] != "10.78.0." + match.group(1):
-        raise Blocked("node/IP outside the approved disposable range")
+    if raw["schema"] == 2:
+        if not match or raw["ip"] != "10.78.0." + match.group(1):
+            raise Blocked("node/IP outside the approved disposable range")
+    else:
+        fresh = {"sentinel-fresh-cp01": "10.78.0.30", "sentinel-fresh-w01": "10.78.0.31"}
+        if name not in fresh or fresh[name] != raw["ip"]:
+            raise Blocked("node/IP outside the separate fresh-cluster profile")
     nonce = raw["nonce"]
     if not isinstance(nonce, str) or not NONCE_RE.fullmatch(nonce):
         raise Blocked("invalid per-VM provisioning nonce")
@@ -111,6 +115,7 @@ def decode_records(blob: bytes) -> list[tuple[str, str]]:
 def publish(pool: Path, value: str, *, fixture: bool = False) -> str:
     if not sys.platform.startswith("linux") or os.name != "posix":
         raise Blocked("KVP publication requires Linux")
+    import fcntl  # Pure identity validation also runs in Windows offline tests.
     if not fixture and pool not in POOLS:
         raise Blocked("unexpected KVP pool path")
     if pool.is_symlink() or not pool.is_file():
