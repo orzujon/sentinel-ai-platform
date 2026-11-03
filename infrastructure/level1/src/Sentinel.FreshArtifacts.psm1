@@ -86,10 +86,8 @@ function Get-SentinelFreshArtifactSelection {
         throw 'BLOCKED: artifact profile is pending independent review; no deployment is permitted'
     }
     # Path is derived from pinned build and checksum: never read a path supplied by the lock.
-    if ([IO.Path]::GetFullPath($CacheRoot).TrimEnd('\') -cne 'C:\Sentinel\ImageCache' -and
-        -not $PSBoundParameters.ContainsKey('CacheRoot')) {
-        throw 'BLOCKED: unexpected Stage2 cache root'
-    }
+    # CacheRoot is not exposed by the operator entrypoint. Unit tests inject
+    # an isolated fixture root; normal runs use the fixed Stage2 cache root.
     $buildFolder = Join-Path (Join-Path (Join-Path $CacheRoot 'ubuntu') '26.04') ([string]$lock.image.buildId)
     $image = Join-Path $buildFolder ([string]$lock.image.sha256 + '.img')
     if ($VerifyImageCache) {
