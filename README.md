@@ -1,5 +1,15 @@
 # Sentinel AI Platform
 
+**AI operations + infrastructure engineering portfolio project.** Two deliberately separate lab tracks: (1) GPU-backed incident investigation with runbook retrieval and synthetic evaluation; (2) approval-gated Hyper-V → Ubuntu → Ansible → Kubernetes provisioning.
+
+**Start with the [engineering case study](docs/portfolio-case-study.md)** for the problem, architecture, measured results, failure analysis, design trade-offs and unfinished work.
+
+**New research track (plan only):** [Self-Healing Kubernetes — academic replication protocol](docs/research/self-healing-kubernetes/REPLICATION-PLAN.md) lays out hypotheses, safe workload-fault experiments, metrics, baselines, redacted evidence and approval-gated recovery. No experiments have yet been run under this protocol.
+
+> **Looking for the infrastructure side?** Start with [Level 1 Hyper-V / Ubuntu provisioning](infrastructure/level1/README.md), [Ansible and Kubernetes reconciliation](infrastructure/ansible/README.md), and the [platform architecture](infrastructure/level1/docs/ARCHITECTURE.md). These are evolving lab workflows, not a finished one-command production installer.
+
+**Explore:** [Case study](docs/portfolio-case-study.md) · [API and RAG](#current-architecture) · [Synthetic evaluations](#day-2-labelled-evaluation-suite) · [Infrastructure automation](infrastructure/level1/README.md) · [Tests](#tests) · [Roadmap](#roadmap)
+
 **GPU-backed, read-only AI incident investigation lab with measured operational reliability and a curated runbook retrieval prototype.**
 
 > **Lab only.** This project processes *synthetic* incident reports. Its local API is unauthenticated; do not expose it to the public internet or submit sensitive data. Generated recommendations are not verified diagnoses.
