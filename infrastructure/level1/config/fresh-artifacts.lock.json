@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "profile": "sentinel-fresh-cluster-v1",
+  "review": {
+    "status": "pending-review",
+    "approvedBy": null,
+    "approvedAtUtc": null,
+    "approvalReference": null
+  },
+  "image": {
+    "imageRef": "ubuntu-26.04-20261016",
+    "buildId": "20261016",
+    "sourceUrl": "https://cloud-images.ubuntu.com/releases/26.04/release-20261016/ubuntu-26.04-server-cloudimg-amd64.img",
+    "sha256": "5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5"
+  },
+  "flannel": {
+    "version": "v0.28.10",
+    "sourceUrl": "https://github.com/flannel-io/flannel/releases/download/v0.28.10/kube-flannel.yml",
+    "sha256": "393bdbce53eb50c8eb97dd513b218518b7d6e7985dc7b889be956e112a711084"
+  }
+}
