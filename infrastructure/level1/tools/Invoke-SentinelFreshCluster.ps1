@@ -9,20 +9,18 @@ identities, then reuse the existing Ansible playbooks through a scoped runner.
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('PLAN','BOOTSTRAP','CREATE','TRUST','READINESS','BASELINE','REPOSITORY','PACKAGES','INIT','CNI','JOIN','VERIFY','NETWORK-TEST')]
+    [ValidateSet('ARTIFACTS','PLAN','BOOTSTRAP','CREATE','TRUST','READINESS','BASELINE','REPOSITORY','PACKAGES','INIT','CNI','JOIN','VERIFY','NETWORK-TEST')]
     [string]$Stage = 'PLAN',
     [ValidateSet('control-plane','worker')][string]$Node,
-    [string]$ImagePath,
-    [string]$ImageSHA256,
+    [ValidateSet('sentinel-fresh-cluster-v1')][string]$Profile = 'sentinel-fresh-cluster-v1',
     [string]$WSLPrivateKey = '/home/orzu/.ssh/id_ed25519',
-    [string]$FlannelSHA256,
     [string]$Approval
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 # Check approval and arguments BEFORE any access to Hyper-V or WSL.
 $Stage = $Stage.ToUpperInvariant()
-$readOnly = @('PLAN','READINESS','VERIFY')
+$readOnly = @('ARTIFACTS','PLAN','READINESS','VERIFY')
 $expectedApproval = 'FRESH_'+$Stage.Replace('-','_')
 if ($Stage -in @('CREATE','TRUST')) {
     if (-not $Node) { throw 'BLOCKED: exact new Node role required' }
@@ -32,11 +30,28 @@ if ($Stage -notin $readOnly -and $Approval -cne $expectedApproval) {
     throw "BLOCKED: this stage requires -Approval $expectedApproval"
 }
 if ($Stage -in $readOnly -and $Approval) { throw 'BLOCKED: read-only stage accepts no approval' }
-if ($Stage -in @('CREATE','BOOTSTRAP') -and (-not $ImagePath -or $ImageSHA256 -cnotmatch '^[a-f0-9]{64}$')) {
-    throw 'BLOCKED: CREATE requires exact reviewed Stage2 ImagePath and ImageSHA256'
-}
-if ($Stage -in @('CNI','BOOTSTRAP') -and $FlannelSHA256 -cnotmatch '^[a-f0-9]{64}$') {
-    throw 'BLOCKED: CNI requires reviewed upstream Flannel v0.28.10 SHA256'
+Import-Module (Join-Path $PSScriptRoot '..\src\Sentinel.FreshArtifacts.psm1') -Force
+# Artifact lock is resolved before any Hyper-V/WSL operation and cannot be
+# overridden by copied paths/digests. ARTIFACTS is an offline inspection mode.
+$artifacts = $null
+if ($Stage -in @('ARTIFACTS','PLAN','BOOTSTRAP','CREATE','CNI')) {
+    $needsImage = $Stage -in @('PLAN','BOOTSTRAP','CREATE')
+    $needsApproval = $Stage -in @('BOOTSTRAP','CREATE','CNI')
+    $artifacts = Get-SentinelFreshArtifactSelection -Profile $Profile -VerifyImageCache:$needsImage -RequireApproval:$needsApproval
+    Write-Host ("FRESH_ARTIFACT_PROFILE: profile={0} lockSHA256={1} status={2} image={3} imageSHA256={4} flannel={5} upstreamSHA256={6} cacheVerified={7}" -f
+        $artifacts.Profile,$artifacts.LockSHA256,$artifacts.ReviewStatus,
+        $artifacts.ImageRef,$artifacts.ImageSHA256,$artifacts.FlannelVersion,
+        $artifacts.FlannelSHA256,$artifacts.ImageCacheVerified)
+    Write-Host ("FRESH_ARTIFACT_PATH: {0}" -f $artifacts.ImagePath)
+    if ($Stage -eq 'ARTIFACTS') {
+        if (-not $artifacts.Approved) {
+            Write-Host 'FRESH_ARTIFACT_REVIEW_REQUIRED: pinned candidate is not independently deployment-approved'
+        }
+        return
+    }
+    if ($Stage -eq 'PLAN' -and -not $artifacts.Approved) {
+        throw 'BLOCKED: profile candidate requires an independently reviewed approval PR; no creation plan authorized'
+    }
 }
 Import-Module (Join-Path $PSScriptRoot '..\src\Sentinel.FreshCluster.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\src\Sentinel.WslPaths.psm1') -Force
@@ -68,12 +83,12 @@ if ($Stage -eq 'BOOTSTRAP') {
     # build only; a later invocation refuses occupied names rather than replaying.
     $creator = Join-Path $PSScriptRoot 'New-SentinelFreshVM.ps1'
     foreach ($role in @('control-plane','worker')) {
-        & $creator -Mode PLAN -Node $role -ImagePath $ImagePath -ImageSHA256 $ImageSHA256
+        & $creator -Mode PLAN -Node $role -ImagePath $artifacts.ImagePath -ImageSHA256 $artifacts.ImageSHA256
     }
     $self = $PSCommandPath
     foreach ($role in @('control-plane','worker')) {
         $roleToken = $role.ToUpperInvariant().Replace('-','_')
-        & $self -Stage CREATE -Node $role -ImagePath $ImagePath -ImageSHA256 $ImageSHA256 `
+        & $self -Stage CREATE -Node $role -Profile $Profile `
             -WSLPrivateKey $WSLPrivateKey -Approval ('FRESH_CREATE_'+$roleToken)
         $ready = $false
         $waitClock = [Diagnostics.Stopwatch]::StartNew()
@@ -101,17 +116,16 @@ if ($Stage -eq 'BOOTSTRAP') {
         & $self -Stage TRUST -Node $role -WSLPrivateKey $WSLPrivateKey -Approval ('FRESH_TRUST_'+$roleToken)
     }
     foreach ($next in @('READINESS','BASELINE','REPOSITORY','PACKAGES','INIT','CNI','JOIN','VERIFY','NETWORK-TEST')) {
-        $argsForStage = @{Stage=$next; WSLPrivateKey=$WSLPrivateKey}
+        $argsForStage = @{Stage=$next; Profile=$Profile; WSLPrivateKey=$WSLPrivateKey}
         if ($next -notin $readOnly) { $argsForStage.Approval = 'FRESH_'+$next.Replace('-','_') }
-        if ($next -eq 'CNI') { $argsForStage.FlannelSHA256 = $FlannelSHA256 }
-        & $self @argsForStage
+                & $self @argsForStage
     }
     Write-Host 'FRESH_BOOTSTRAP_E2E_PASS: both fresh nodes, KVP, pinned SSH, packages, Kubernetes and active network checks passed'
     return
 }
 if ($Stage -eq 'CREATE') {
     & (Join-Path $PSScriptRoot 'New-SentinelFreshVM.ps1') -Mode CREATE -Node $Node `
-        -ImagePath $ImagePath -ImageSHA256 $ImageSHA256 -Approval CREATE_SENTINEL_FRESH_CLUSTER_NODE
+        -ImagePath $artifacts.ImagePath -ImageSHA256 $artifacts.ImageSHA256 -Approval CREATE_SENTINEL_FRESH_CLUSTER_NODE
     return
 }
 $trust = Join-Path $PSScriptRoot 'Invoke-SentinelFreshTrust.ps1'
@@ -135,6 +149,6 @@ $runner = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\ansible\fresh_c
 $arguments = @('-d','Ubuntu-26.04','--exec','python3', (ConvertTo-SentinelWslMountPath $runner),
     '--stage',$Stage.ToLowerInvariant(),'--key',$WSLPrivateKey)
 if ($Stage -notin $readOnly) { $arguments += @('--approval',$Approval) }
-if ($Stage -eq 'CNI') { $arguments += @('--flannel-sha256',$FlannelSHA256) }
+if ($Stage -eq 'CNI') { $arguments += @('--flannel-sha256',$artifacts.FlannelSHA256) }
 & wsl.exe @arguments
 if ($LASTEXITCODE -ne 0) { throw "BLOCKED: fresh stage $Stage failed; no automatic retry, rollback or deletion" }
