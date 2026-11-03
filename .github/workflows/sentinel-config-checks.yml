@@ -25,6 +25,8 @@ jobs:
         run: python -m unittest discover -s infrastructure/ansible/tests -p 'test_*.py' -v
       - name: Install Ansible for playbook syntax gate
         run: python -m pip install 'ansible-core>=2.18,<2.21'
+      - name: Validate fresh cluster identity and rendered existing playbooks offline
+        run: python infrastructure/ansible/tests/check_fresh_syntax.py
       - name: Validate non-mutating Stage 4 playbook syntax
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/00-readiness.yml
       - name: Validate approved fresh-only KVP package installation syntax
@@ -61,6 +63,8 @@ jobs:
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/140-cluster-validate.yml
       - name: Validate Stage 4.4.1 approved active networking playbook
         run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/150-active-network.yml
+      - name: Validate Stage 5.5 read-only worker workload and storage audit playbook
+        run: ansible-playbook --syntax-check infrastructure/ansible/playbooks/160-worker-rebuild-plan.yml
       - name: Compile Python management runner
         run: python -m py_compile infrastructure/ansible/run_readiness.py infrastructure/ansible/reconcile.py
       - name: Test exact disposable KVP five-package transaction gate
@@ -69,6 +73,10 @@ jobs:
         run: python -m unittest discover -s infrastructure/level1/tests -p 'test_worker_replica_kvp_kernel_recovery.py' -v
       - name: Test disposable KVP guest-to-host SSH public key publisher
         run: python -m unittest discover -s infrastructure/level1/tests -p 'test_worker_replica_kvp_publisher.py' -v
+      - name: Verify fresh firstboot KVP shell script syntax
+        run: bash -n infrastructure/level1/src/firstboot-kvp-setup.sh
+      - name: Test Stage54 self-contained firstboot KVP publisher
+        run: python -m unittest discover -s infrastructure/level1/tests -p 'test_firstboot_kvp.py' -v
       - name: Execute Level 1 static package tests
         run: python -m unittest discover -s infrastructure/level1/tests -p 'test_*.py' -v
       - name: Demonstrate read-only sample plan
@@ -78,6 +86,14 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Test separate fresh cluster gates and mocked host checks
+        shell: powershell
+        run: |
+          .\infrastructure\level1\tests\Test-FreshClusterPlan.ps1
+          .\infrastructure\level1\tests\Test-FreshCluster.ps1
+          .\infrastructure\level1\tests\Test-FreshClusterHost.ps1
+          .\infrastructure\level1\tests\Test-SandboxPower.ps1
+          .\infrastructure\level1\tests\Test-FreshSshTrust.ps1
       - name: Exercise cross-platform guest KVP publisher offline tests on Windows
         shell: powershell
         run: python -m unittest discover -s infrastructure/ansible/tests -p 'test_publish_guest_kvp_hostkey.py' -v
@@ -140,9 +156,21 @@ jobs:
       - name: Validate KVP-pinned SSH trust registration and Windows ACL protection
         shell: powershell
         run: .\infrastructure\level1\tests\Test-WorkerReplicaSshTrust.ps1
+      - name: Verify reusable Stage54 no-TOFU fresh VM to Ansible bootstrap contract
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-Stage54.ps1
+      - name: Verify Stage54 guarded cleanup approval, UUID binding and cleanup-first gate
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-Stage54Cleanup.ps1
+      - name: Smoke-test complete Stage54 cleanup PLAN on ephemeral fake Hyper-V VM layout
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-Stage54CleanupPlanSmoke.ps1
       - name: Verify worker-shaped two-NIC disposable VM and safety contracts offline
         shell: powershell
         run: .\infrastructure\level1\tests\Test-WorkerReplicaContract.ps1
+      - name: Verify Stage55 read-only worker rebuild plan remains fail-closed
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-Stage55Plan.ps1
       - name: Validate disposable VM provisioner syntax and isolation contract
         shell: powershell
         run: |

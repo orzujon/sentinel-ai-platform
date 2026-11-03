@@ -16,10 +16,15 @@ function Get-SentinelTrustedHostLine {
     param(
         [Parameter(Mandatory)][string]$IPAddress,
         [Parameter(Mandatory)][string]$PublicKey,
-        [Parameter(Mandatory)][string]$Fingerprint
+        [Parameter(Mandatory)][string]$Fingerprint,
+        [switch]$FreshCluster
     )
-    if ($IPAddress -cne '10.78.0.12') {
-        throw 'BLOCKED: trusted host entry must target only disposable IP 10.78.0.12'
+    if ($FreshCluster) {
+        if ($IPAddress -cnotmatch '^10\.78\.0\.(30|31)$') {
+            throw 'BLOCKED: fresh-cluster trust must target the exact new pair only'
+        }
+    } elseif ($IPAddress -cnotmatch '^10\.78\.0\.(12|2[0-9])$') {
+        throw 'BLOCKED: trusted host entry must target approved disposable slot only'
     }
     $calculated = Get-SentinelHostKeyFingerprint -PublicKey $PublicKey
     if ($calculated -cne $Fingerprint) {
@@ -68,10 +73,13 @@ function Get-SentinelTrustStoreState {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$ExpectedLine
+        [Parameter(Mandatory)][string]$ExpectedLine,
+        [switch]$FreshCluster
     )
     Assert-SentinelTrustStoreDirectory -Path $Path
-    if ($ExpectedLine -cnotmatch '^10\.78\.0\.12 ssh-ed25519 [A-Za-z0-9+/]+={0,2}$') {
+    $linePattern = if ($FreshCluster) { '^10\.78\.0\.(30|31) ssh-ed25519 [A-Za-z0-9+/]+={0,2}$' }
+        else { '^10\.78\.0\.(12|2[0-9]) ssh-ed25519 [A-Za-z0-9+/]+={0,2}$' }
+    if ($ExpectedLine -cnotmatch $linePattern) {
         throw 'BLOCKED: unexpected trusted host line'
     }
     if (-not [IO.File]::Exists($Path)) {
@@ -103,9 +111,10 @@ function Register-SentinelTrustedHostFile {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$ExpectedLine
+        [Parameter(Mandatory)][string]$ExpectedLine,
+        [switch]$FreshCluster
     )
-    $state = Get-SentinelTrustStoreState -Path $Path -ExpectedLine $ExpectedLine
+    $state = Get-SentinelTrustStoreState -Path $Path -ExpectedLine $ExpectedLine -FreshCluster:$FreshCluster
     if ($state -eq 'MATCH') { return 'ALREADY_REGISTERED' }
     if ($state -ne 'ABSENT') { throw 'BLOCKED: unexpected trust state' }
 
@@ -138,7 +147,7 @@ function Register-SentinelTrustedHostFile {
     } finally {
         $stream.Dispose()
     }
-    if ((Get-SentinelTrustStoreState -Path $Path -ExpectedLine $ExpectedLine) -ne 'MATCH') {
+    if ((Get-SentinelTrustStoreState -Path $Path -ExpectedLine $ExpectedLine -FreshCluster:$FreshCluster) -ne 'MATCH') {
         throw 'BLOCKED: trusted host registration did not verify after write'
     }
     return 'REGISTERED'

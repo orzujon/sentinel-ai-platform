@@ -1,0 +1,91 @@
+---
+# Stage 5.5 read-only Kubernetes worker replacement audit.
+# This never cordons, drains, deletes a Node, alters trust, or starts VM teardown.
+- name: Inventory the existing worker and its Kubernetes workload/data dependencies
+  hosts: sentinel_control_plane
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    sentinel_worker_name: "{{ groups['sentinel_workers'][0] }}"
+    sentinel_cp_name: "{{ groups['sentinel_control_plane'][0] }}"
+    sentinel_kubeconfig: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Require exactly one expected control plane and worker
+      ansible.builtin.assert:
+        that:
+          - groups['sentinel_control_plane'] | length == 1
+          - groups['sentinel_workers'] | length == 1
+          - sentinel_cp_name == 'sentinel-l1-cp01'
+          - sentinel_worker_name == 'sentinel-l1-w01'
+          - sentinel_worker_name != sentinel_cp_name
+
+    - name: Confirm control-plane API health without changes
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", get, --raw=/readyz]
+      changed_when: false
+      register: sentinel_api_health
+
+    - name: Read registered Kubernetes nodes
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", get, nodes, -o, json]
+      changed_when: false
+      register: sentinel_node_data
+
+    - name: Read all namespace pod placements
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", get, pods, --all-namespaces, -o, json]
+      changed_when: false
+      register: sentinel_pod_data
+
+    - name: Read all persistent volumes
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", get, pv, -o, json]
+      changed_when: false
+      register: sentinel_pv_data
+
+    - name: Read all persistent volume claims
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", get, pvc, --all-namespaces, -o, json]
+      changed_when: false
+      register: sentinel_pvc_data
+
+    - name: Read pod disruption budgets
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ sentinel_kubeconfig }}", get, pdb, --all-namespaces, -o, json]
+      changed_when: false
+      register: sentinel_pdb_data
+
+    - name: Parse read-only Kubernetes inventory
+      ansible.builtin.set_fact:
+        sentinel_nodes: "{{ (sentinel_node_data.stdout | from_json)['items'] }}"
+        sentinel_pods: "{{ (sentinel_pod_data.stdout | from_json)['items'] }}"
+        sentinel_pvs: "{{ (sentinel_pv_data.stdout | from_json)['items'] }}"
+        sentinel_pvcs: "{{ (sentinel_pvc_data.stdout | from_json)['items'] }}"
+        sentinel_pdbs: "{{ (sentinel_pdb_data.stdout | from_json)['items'] }}"
+
+    - name: Build worker and storage risk observations
+      ansible.builtin.set_fact:
+        sentinel_worker_pods: "{{ sentinel_pods | selectattr('spec.nodeName', 'defined') | selectattr('spec.nodeName', 'equalto', sentinel_worker_name) | list }}"
+        sentinel_local_pvs: "{{ (sentinel_pvs | selectattr('spec.local', 'defined') | list) + (sentinel_pvs | selectattr('spec.hostPath', 'defined') | list) }}"
+        sentinel_nodes_by_name: "{{ dict(sentinel_nodes | map(attribute='metadata.name') | zip(sentinel_nodes)) }}"
+
+    - name: Require the original control plane and worker still Ready
+      ansible.builtin.assert:
+        that:
+          - sentinel_api_health.stdout | trim == 'ok'
+          - sentinel_nodes_by_name | length == 2
+          - sentinel_cp_name in sentinel_nodes_by_name
+          - sentinel_worker_name in sentinel_nodes_by_name
+          - "'True' in (sentinel_nodes_by_name[sentinel_cp_name].status.conditions | selectattr('type','equalto','Ready') | map(attribute='status') | list)"
+          - "'True' in (sentinel_nodes_by_name[sentinel_worker_name].status.conditions | selectattr('type','equalto','Ready') | map(attribute='status') | list)"
+          - sentinel_nodes_by_name[sentinel_worker_name].status.nodeInfo.kubeletVersion == 'v1.37.2'
+          - "hostvars[sentinel_worker_name].ansible_host in (sentinel_nodes_by_name[sentinel_worker_name].status.addresses | selectattr('type', 'equalto', 'InternalIP') | map(attribute='address') | list)"
+
+    - name: Report worker workload and persistence inventory without revealing secrets
+      ansible.builtin.debug:
+        msg:
+          - "STAGE55_K8S_INVENTORY: worker={{ sentinel_worker_name }} workerPods={{ sentinel_worker_pods | length }} pv={{ sentinel_pvs | length }} pvc={{ sentinel_pvcs | length }} localOrHostPathPV={{ sentinel_local_pvs | length }} pdb={{ sentinel_pdbs | length }}"
+          - "STAGE55_K8S_NODE_UID: worker={{ sentinel_nodes_by_name[sentinel_worker_name].metadata.uid }}"
+          - "STAGE55_K8S_PLAN_READY_ONLY: Kubernetes resources observed read-only; workloads/drain/backup safety not automatically approved"
+          - "STAGE55_DELETE_BLOCKED: no implemented worker KVP replacement or approved Kubernetes node rotation"
