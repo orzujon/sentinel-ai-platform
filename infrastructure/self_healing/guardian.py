@@ -18,7 +18,7 @@ import sys
 
 NAMESPACE = "sentinel-healing-lab"
 DEPLOYMENT = "sentinel-demo-api"
-NODES = {"sentinel-fresh-cp01", "sentinel-fresh-w01"}
+NODES = {"cp01", "w01"}
 MARKER = "sentinel.ai/demo-only"
 APPROVAL = "HEAL_EXACT_SENTINEL_DEMO"
 UID = re.compile(r"^[a-f0-9-]{36}$", re.I)
