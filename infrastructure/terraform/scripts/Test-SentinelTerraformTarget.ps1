@@ -22,7 +22,7 @@ $raw = & kubectl.exe "--kubeconfig=$cfg" get nodes -o json
 if ($LASTEXITCODE -ne 0 -or -not $raw) {
     throw 'BLOCKED: cannot inspect Kubernetes node inventory'
 }
-$nodes = @(($raw | ConvertFrom-Json).items)
+$nodes = @((ConvertFrom-Json -InputObject ($raw -join [Environment]::NewLine)).items)
 $names = @($nodes | ForEach-Object { $_.metadata.name } | Sort-Object)
 if ($names.Count -ne 2 -or $names[0] -cne 'cp01' -or $names[1] -cne 'w01') {
     throw 'BLOCKED: not exactly the cp01/w01 target'
