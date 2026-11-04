@@ -1,5 +1,7 @@
 # Separate two-node Kubernetes bootstrap
 
+**Current live state (operator report, 2026-11-04):** exactly two fresh VMs `cp01` and `w01` were built through one uninterrupted BOOTSTRAP on Git commit `30c7927fbbbd57baef2e0516cf7ba7b210a238f6`, then both successfully recovered after the separately approved sequential reboot test. Final markers: `FRESH_BOOTSTRAP_E2E_PASS` and `FRESH_REBOOT_PERSISTENCE_PASS`. See [clean acceptance](CLEAN-BOOTSTRAP-ACCEPTANCE.md). Historical notes below describe the older `sentinel-fresh-*` experiment and **do not** describe the current VM inventory. The `cp01/w01` cluster is occupied; do not rerun BOOTSTRAP on it.
+
 Status: first operator-run live build completed with in-run code corrections;
 network acceptance and post-cleanup verification passed on 3 November 2026.
 The original sandbox passed operator-run verification on 2 November 2026
