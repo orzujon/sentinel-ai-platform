@@ -1,0 +1,95 @@
+# Disposable synthetic self-healing experiment; install ONLY by explicit operator action.
+# No cluster-admin permissions, service-account token or exposed ingress.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sentinel-healing-lab
+  labels:
+    sentinel.ai/demo-only: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentinel-demo-api
+  namespace: sentinel-healing-lab
+  labels:
+    app: sentinel-demo-api
+    sentinel.ai/demo-only: "true"
+  annotations:
+    sentinel.ai/desired-replicas: "1"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: sentinel-demo-api
+  template:
+    metadata:
+      labels:
+        app: sentinel-demo-api
+        sentinel.ai/demo-only: "true"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        runAsNonRoot: true
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: demo
+          image: busybox:1.37.0
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args: ["printf 'sentinel demo healthy\n' > /www/index.html; exec httpd -f -p 8080 -h /www"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 1
+            periodSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: www
+              mountPath: /www
+      volumes:
+        - name: www
+          emptyDir:
+            sizeLimit: 1Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sentinel-demo-api
+  namespace: sentinel-healing-lab
+  labels:
+    sentinel.ai/demo-only: "true"
+spec:
+  selector:
+    app: sentinel-demo-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  type: ClusterIP

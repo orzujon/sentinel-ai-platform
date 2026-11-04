@@ -1,0 +1,74 @@
+{
+  "nodes": {
+    "items": [
+      {
+        "metadata": {
+          "name": "cp01"
+        },
+        "status": {
+          "conditions": [
+            {
+              "type": "Ready",
+              "status": "True"
+            }
+          ]
+        }
+      },
+      {
+        "metadata": {
+          "name": "w01"
+        },
+        "status": {
+          "conditions": [
+            {
+              "type": "Ready",
+              "status": "True"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "namespace": {
+    "metadata": {
+      "name": "sentinel-healing-lab",
+      "uid": "11111111-1111-4111-8111-111111111111",
+      "resourceVersion": "300",
+      "labels": {
+        "sentinel.ai/demo-only": "true"
+      }
+    }
+  },
+  "deployment": {
+    "metadata": {
+      "name": "sentinel-demo-api",
+      "namespace": "sentinel-healing-lab",
+      "uid": "22222222-2222-4222-8222-222222222222",
+      "resourceVersion": "400",
+      "labels": {
+        "sentinel.ai/demo-only": "true"
+      },
+      "annotations": {
+        "sentinel.ai/desired-replicas": "1"
+      }
+    },
+    "spec": {
+      "replicas": 0,
+      "selector": {
+        "matchLabels": {
+          "app": "sentinel-demo-api"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app": "sentinel-demo-api"
+          }
+        }
+      }
+    },
+    "status": {
+      "availableReplicas": 0
+    }
+  }
+}
