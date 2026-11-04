@@ -67,14 +67,21 @@ function Assert-FreshController {
 }
 Assert-FreshController
 if ($Stage -eq 'BOOTSTRAP') {
-    # Clean acceptance is intentionally stricter than individually creating
-    # a node: no previous or unrelated Hyper-V VMs may be registered.
+    # A clean acceptance run must start without registered Hyper-V guests.
     if (@(Get-VM -ErrorAction Stop).Count -ne 0) {
         throw 'BLOCKED: clean BOOTSTRAP requires zero registered Hyper-V VMs'
     }
     $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
     $revision = @(& git -C $repoRoot rev-parse HEAD)
-    if ($LASTEXITCODE -ne 0 -or $revision.Count -ne 1 -or $revision[0] -cnotmatch '^[0-9a-f]{40} must pass before creating either VM. This is a clean
+    if ($LASTEXITCODE -ne 0 -or $revision.Count -ne 1 -or $revision[0] -cnotmatch '^[0-9a-f]{40}$') {
+        throw 'BLOCKED: clean BOOTSTRAP requires a resolvable Git commit'
+    }
+    $changes = @(& git -C $repoRoot status --porcelain)
+    if ($LASTEXITCODE -ne 0 -or $changes.Count -gt 0) {
+        throw 'BLOCKED: clean BOOTSTRAP requires a clean Git working tree'
+    }
+    Write-Host ("FRESH_BOOTSTRAP_REVISION_PIN: git={0} VMNames=cp01,w01" -f $revision[0])
+    # Both target plans must pass before creating either VM. This is a clean
     # build only; a later invocation refuses occupied names rather than replaying.
     $creator = Join-Path $PSScriptRoot 'New-SentinelFreshVM.ps1'
     foreach ($role in @('control-plane','worker')) {
@@ -142,7 +149,7 @@ if ($identities.Count -ne 2 -or $identities[0].vmId -eq $identities[1].vmId -or
     throw 'BLOCKED: two independent guest identities required'
 }
 if ($Stage -eq 'REBOOT-TEST') {
-    # Observe a healthy two-node cluster before any disruptive reboot.
+    # Verify Kubernetes is healthy before the disruptive test.
     & $PSCommandPath -Stage VERIFY -WSLPrivateKey $WSLPrivateKey
 }
 $runner = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\ansible\fresh_cluster.py'))
@@ -153,91 +160,7 @@ if ($Stage -eq 'CNI') { $arguments += @('--flannel-sha256',$FlannelSHA256) }
 & wsl.exe @arguments
 if ($LASTEXITCODE -ne 0) { throw "BLOCKED: fresh stage $Stage failed; no automatic retry, rollback or deletion" }
 if ($Stage -eq 'REBOOT-TEST') {
-    # After both guests return, establish Kubernetes and active traffic health
-    # through their existing guarded read-only/temporary-lab acceptance stages.
     & $PSCommandPath -Stage VERIFY -WSLPrivateKey $WSLPrivateKey
     & $PSCommandPath -Stage NETWORK-TEST -WSLPrivateKey $WSLPrivateKey -Approval FRESH_NETWORK_TEST
     Write-Host 'FRESH_REBOOT_PERSISTENCE_PASS: cp01+w01 rebooted sequentially; Kubernetes, DNS/CNI and live cross-node/service tests passed.'
 }
-) {
-        throw 'BLOCKED: clean BOOTSTRAP requires a resolvable Git commit'
-    }
-    $changes = @(& git -C $repoRoot status --porcelain)
-    if ($LASTEXITCODE -ne 0 -or $changes.Count -gt 0) {
-        throw 'BLOCKED: clean BOOTSTRAP requires a clean Git working tree'
-    }
-    Write-Host ("FRESH_BOOTSTRAP_REVISION_PIN: git={0} VMNames=cp01,w01" -f $revision[0])
-    # Both target plans must pass before creating either VM. This is a clean
-    # build only; a later invocation refuses occupied names rather than replaying.
-    $creator = Join-Path $PSScriptRoot 'New-SentinelFreshVM.ps1'
-    foreach ($role in @('control-plane','worker')) {
-        & $creator -Mode PLAN -Node $role -ImagePath $ImagePath -ImageSHA256 $ImageSHA256
-    }
-    $self = $PSCommandPath
-    foreach ($role in @('control-plane','worker')) {
-        $roleToken = $role.ToUpperInvariant().Replace('-','_')
-        & $self -Stage CREATE -Node $role -ImagePath $ImagePath -ImageSHA256 $ImageSHA256 `
-            -WSLPrivateKey $WSLPrivateKey -Approval ('FRESH_CREATE_'+$roleToken)
-        $ready = $false
-        $waitClock = [Diagnostics.Stopwatch]::StartNew()
-        $lastWaitReason = ''
-        for ($attempt=0; $attempt -lt 120; $attempt++) {
-            try {
-                & (Join-Path $PSScriptRoot 'Invoke-SentinelFreshTrust.ps1') -Mode VERIFY -Node $role
-                $ready = $true
-                break
-            } catch {
-                # Show the actual host verification failure, not a misleading
-                # guest-progress claim. Do not dump guest payloads or credentials.
-                $reason = ($_.Exception.Message -replace '[\r\n\x00-\x1f]+',' ').Trim()
-                if ($reason.Length -gt 500) { $reason = $reason.Substring(0,500)+'...' }
-                if ($reason -cne $lastWaitReason -or $attempt % 6 -eq 0) {
-                    Write-Host ("FRESH_KVP_WAIT: node={0}; elapsed={1}s; attempt={2}/120; reason={3}" -f
-                        $role,[int]$waitClock.Elapsed.TotalSeconds,($attempt+1),$reason)
-                }
-                $lastWaitReason = $reason
-                Start-Sleep -Seconds 5
-            }
-        }
-        $waitClock.Stop()
-        if (-not $ready) { throw "BLOCKED: KVP not verified for $role. Last check: $lastWaitReason. Preserve partial build and inspect console; do not rerun BOOTSTRAP." }
-        & $self -Stage TRUST -Node $role -WSLPrivateKey $WSLPrivateKey -Approval ('FRESH_TRUST_'+$roleToken)
-    }
-    foreach ($next in @('READINESS','BASELINE','REPOSITORY','PACKAGES','INIT','CNI','JOIN','VERIFY','NETWORK-TEST')) {
-        $argsForStage = @{Stage=$next; WSLPrivateKey=$WSLPrivateKey}
-        if ($next -notin $readOnly) { $argsForStage.Approval = 'FRESH_'+$next.Replace('-','_') }
-        if ($next -eq 'CNI') { $argsForStage.FlannelSHA256 = $FlannelSHA256 }
-        & $self @argsForStage
-    }
-    Write-Host 'FRESH_BOOTSTRAP_E2E_PASS: both fresh nodes, KVP, pinned SSH, packages, Kubernetes and active network checks passed'
-    return
-}
-if ($Stage -eq 'CREATE') {
-    & (Join-Path $PSScriptRoot 'New-SentinelFreshVM.ps1') -Mode CREATE -Node $Node `
-        -ImagePath $ImagePath -ImageSHA256 $ImageSHA256 -Approval CREATE_SENTINEL_FRESH_CLUSTER_NODE
-    return
-}
-$trust = Join-Path $PSScriptRoot 'Invoke-SentinelFreshTrust.ps1'
-if ($Stage -eq 'TRUST') {
-    & $trust -Mode VERIFY -Node $Node
-    & $trust -Mode REGISTER -Node $Node -Approval REGISTER_KVP_VERIFIED_SENTINEL_FRESH_HOST_KEY
-    & $trust -Mode ACCEPT -Node $Node
-    & $trust -Mode ANSIBLE -Node $Node -WSLPrivateKey $WSLPrivateKey
-    return
-}
-# Re-read KVP and NIC/UUID/disk bindings for BOTH nodes before any guest stage.
-$identities = @()
-foreach ($role in @('control-plane','worker')) {
-    $identities += & $trust -Mode EVIDENCE -Node $role
-}
-if ($identities.Count -ne 2 -or $identities[0].vmId -eq $identities[1].vmId -or
-    $identities[0].fingerprint -ceq $identities[1].fingerprint) {
-    throw 'BLOCKED: two independent guest identities required'
-}
-$runner = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\ansible\fresh_cluster.py'))
-$arguments = @('-d','Ubuntu-26.04','--exec','python3', (ConvertTo-SentinelWslMountPath $runner),
-    '--stage',$Stage.ToLowerInvariant(),'--key',$WSLPrivateKey)
-if ($Stage -notin $readOnly) { $arguments += @('--approval',$Approval) }
-if ($Stage -eq 'CNI') { $arguments += @('--flannel-sha256',$FlannelSHA256) }
-& wsl.exe @arguments
-if ($LASTEXITCODE -ne 0) { throw "BLOCKED: fresh stage $Stage failed; no automatic retry, rollback or deletion" }
