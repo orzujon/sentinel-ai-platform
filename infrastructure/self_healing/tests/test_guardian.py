@@ -58,6 +58,20 @@ def args(**kwargs):
 
 
 class GuardianTests(unittest.TestCase):
+    def test_current_live_cluster_names_and_fixture(self):
+        import json
+        self.assertEqual(guardian.NODES, {"cp01", "w01"})
+        fixture = json.loads((Path(__file__).resolve().parents[1] / "fixtures/zero-replica.json").read_text())
+        self.assertEqual(
+            {node["metadata"]["name"] for node in fixture["nodes"]["items"]},
+            {"cp01", "w01"}
+        )
+        self.assertEqual(guardian.create_plan(fixture)["decision"], "PROPOSE_SCALE_TO_ONE")
+        stale = snapshot()
+        stale["nodes"]["items"][0]["metadata"]["name"] = "sentinel-fresh-cp01"
+        with self.assertRaises(guardian.Blocked):
+            guardian.create_plan(stale)
+
     def test_exact_failure_proposes_single_allowed_action(self):
         plan = guardian.create_plan(snapshot())
         self.assertEqual(plan["decision"], "PROPOSE_SCALE_TO_ONE")
