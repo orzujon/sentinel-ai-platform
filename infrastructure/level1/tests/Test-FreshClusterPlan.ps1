@@ -17,7 +17,7 @@ $enough = Get-SentinelFreshClusterCapacity -FreeMemoryBytes 14GB -FreeDiskBytes 
 Assert-True $enough.CapacityAndNamesPassNow 'Exact resource boundary should pass capacity only'
 Assert-True (-not $enough.CreateSupported -and -not $enough.ExecutionAuthorized) 'Capacity must never authorize creation'
 $collision = Get-SentinelFreshClusterCapacity -FreeMemoryBytes 32GB -FreeDiskBytes 200GB `
-    -VMs @([pscustomobject]@{Name='SENTINEL-FRESH-CP01'; MemoryAssigned=0}) -OccupiedPaths @()
+    -VMs @([pscustomobject]@{Name='CP01'; MemoryAssigned=0}) -OccupiedPaths @()
 Assert-True (-not $collision.CapacityAndNamesPassNow) 'Names must collide case-insensitively'
 $disk = Get-SentinelFreshClusterCapacity -FreeMemoryBytes 32GB -FreeDiskBytes 139GB -VMs @() -OccupiedPaths @()
 Assert-True (-not $disk.CapacityAndNamesPassNow) 'Budget full disk capacities and reserve'
