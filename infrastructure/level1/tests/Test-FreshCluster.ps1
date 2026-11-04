@@ -38,7 +38,7 @@ Import-Module (Join-Path $root 'src\Sentinel.FreshCluster.psm1') -Force
 Import-Module (Join-Path $root 'src\Sentinel.KvpEvidence.psm1') -Force
 $cp=Get-SentinelFreshNode -Node control-plane
 $worker=Get-SentinelFreshNode -Node worker
-if ($cp.IP -cne '10.78.0.30' -or $worker.IP -cne '10.78.0.31' -or $cp.Folder -ceq $worker.Folder) { throw 'Wrong profile' }
+if ($cp.Name -cne 'cp01' -or $worker.Name -cne 'w01' -or $cp.IP -cne '10.78.0.30' -or $worker.IP -cne '10.78.0.31' -or $cp.Folder -ceq $worker.Folder) { throw 'Wrong profile' }
 Expect-Blocked { Assert-SentinelFreshPath -Path 'C:\Sentinel\Level1-Sandbox\VMs' }
 $wire=[byte[]](0,0,0,11)+[Text.Encoding]::ASCII.GetBytes('ssh-ed25519')+[byte[]](0,0,0,32)+[byte[]](1..32)
 $key='ssh-ed25519 '+[Convert]::ToBase64String($wire)
