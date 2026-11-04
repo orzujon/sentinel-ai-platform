@@ -65,12 +65,17 @@
         argv: [hostname]
       register: after_hostname
       changed_when: false
-    - name: Confirm runtime services restarted after reboot
+    - name: Wait for runtime services to become active after reboot
+      # SSH can return while systemd is still starting kubelet. Wait for
+      # actual 'active'; never restart/modify the service to make it pass.
       ansible.builtin.command:
         argv: [systemctl, is-active, "{{ item }}"]
       loop: [kubelet, containerd]
       register: after_services
       changed_when: false
+      until: after_services.rc == 0 and (after_services.stdout | trim) == 'active'
+      retries: 36
+      delay: 10
     - name: Confirm runtime services remain enabled
       ansible.builtin.command:
         argv: [systemctl, is-enabled, "{{ item }}"]
@@ -83,6 +88,42 @@
           - after_hostname.stdout | trim == inventory_hostname
           - (after_services.results | map(attribute='stdout') | list) == ['active', 'active']
           - (enabled_services.results | map(attribute='stdout') | list) == ['enabled', 'enabled']
+    - name: Require recovered Kubernetes Node Ready before next guest reboot
+      # In the worker pass this runs on cp01 before cp01 is rebooted.
+      # In the control-plane pass this waits for the restarted API to return.
+      # This observes only; never changes Kubernetes Node objects.
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig=/etc/kubernetes/admin.conf
+          - --request-timeout=15s
+          - wait
+          - --for=condition=Ready
+          - "node/{{ inventory_hostname }}"
+          - --timeout=60s
+      delegate_to: cp01
+      register: after_node_ready
+      changed_when: false
+      until: after_node_ready.rc == 0
+      retries: 6
+      delay: 10
+
+    - name: Require Flannel restored after both guests reboot
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, -n, kube-flannel,
+               rollout, status, daemonset/kube-flannel-ds, --timeout=180s]
+      delegate_to: cp01
+      changed_when: false
+      when: inventory_hostname == 'cp01'
+
+    - name: Require CoreDNS restored after both guests reboot
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, -n, kube-system,
+               rollout, status, deployment/coredns, --timeout=180s]
+      delegate_to: cp01
+      changed_when: false
+      when: inventory_hostname == 'cp01'
+
     - name: Emit exact node recovery marker
       ansible.builtin.debug:
-        msg: "FRESH_REBOOT_NODE_PASS: {{ inventory_hostname }} kubelet/containerd operational"
+        msg: "FRESH_REBOOT_NODE_PASS: {{ inventory_hostname }} kubelet/containerd and Kubernetes Ready"
