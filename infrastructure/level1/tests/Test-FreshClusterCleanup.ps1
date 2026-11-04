@@ -33,7 +33,7 @@ foreach ($required in @(
     'Test-Under','ReparsePoint','sourceImageSHA256','provisioning.json',
     'Remove-VM -VM $vm -Force',
     'Remove-Item -LiteralPath $folder -Recurse -Force',
-    'if ($Mode -eq 'PLAN')',
+    'if ($Mode -eq ''PLAN'')',
     'FRESH_REMOVE_PLAN_READY','FRESH_PAIR_REMOVAL_PASS'
 )) {
     if (-not $source.Contains($required)) {
