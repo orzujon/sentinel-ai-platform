@@ -13,8 +13,8 @@ with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     inventory = root / "inventory.json"
     inventory.write_text(json.dumps({"all": {"children": {"sentinel_sandbox": {"children": {
-        "sentinel_control_plane": {"hosts": {"sentinel-fresh-cp01": {}}},
-        "sentinel_workers": {"hosts": {"sentinel-fresh-w01": {}}}
+        "sentinel_control_plane": {"hosts": {"cp01": {}}},
+        "sentinel_workers": {"hosts": {"w01": {}}}
     }}}}}))
     paths = [fresh.PLAYBOOKS / "05-fresh-identity.yml"]
     for stage, source in fresh.STAGES.items():
