@@ -44,7 +44,7 @@ foreach ($prohibited in @(
     'Remove-VMSwitch','New-VMSwitch','Get-VM -Name sentinel-fresh-*',
     'Remove-VM -Name','Stop-VM -Force','Stop-VM -TurnOff','Checkpoint-VM',
     "Remove-Item -LiteralPath 'C:\Sentinel\ImageCache'",
-    "Remove-Item -LiteralPath $storageRoot"
+    'Remove-Item -LiteralPath $storageRoot'
 )) {
     if ($source.Contains($prohibited)) {
         throw "BLOCKED: overly broad or destructive operation: $prohibited"
