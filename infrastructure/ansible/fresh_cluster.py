@@ -36,6 +36,7 @@ STAGES = {
     "join": "130-reconcile-worker.yml",
     "verify": "140-cluster-validate.yml",
     "network-test": "150-active-network.yml",
+    "reboot-test": "170-fresh-reboot-persistence.yml",
 }
 READ_ONLY = {"readiness", "verify"}
 
