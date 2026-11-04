@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 function Get-SentinelFreshNode {
     [CmdletBinding()]
     param([Parameter(Mandatory)][ValidateSet('control-plane','worker')][string]$Node)
-    $name = if ($Node -eq 'control-plane') { 'sentinel-fresh-cp01' } else { 'sentinel-fresh-w01' }
+    $name = if ($Node -eq 'control-plane') { 'cp01' } else { 'w01' }
     $suffix = if ($Node -eq 'control-plane') { '30' } else { '31' }
     [pscustomobject]@{
         Name=$name; Role=$Node; IP=('10.78.0.'+$suffix)
