@@ -17,9 +17,26 @@ $volume = Get-Volume -DriveLetter C -ErrorAction Stop
 $vms = @(Get-VM -ErrorAction Stop)
 $root = 'C:\Sentinel\FreshCluster\VMs'
 $occupied = @()
-# Treat even an empty pre-existing root or its parent as unreviewed state.
+# A retired pair can legitimately leave empty, ACL-protected parent folders.
+# Their existence alone is not an occupied VM slot. Never delete/reuse any
+# unexpected contents: flag them instead. Exact VM folders are always blockers.
 foreach ($candidate in @('C:\Sentinel\FreshCluster', $root)) {
-    if (Test-Path -LiteralPath $candidate -ErrorAction Stop) { $occupied += $candidate }
+    if (-not (Test-Path -LiteralPath $candidate)) { continue }
+    $item = Get-Item -LiteralPath $candidate -Force -ErrorAction Stop
+    if (-not $item.PSIsContainer -or
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        -not ([IO.Directory]::GetAccessControl($candidate)).AreAccessRulesProtected) {
+        $occupied += $candidate
+        continue
+    }
+    $allowedChild = if ($candidate -eq 'C:\Sentinel\FreshCluster') { @('VMs') } else { @() }
+    foreach ($entry in @(Get-ChildItem -LiteralPath $candidate -Force -ErrorAction Stop)) {
+        if ($entry.Name -cnotin $allowedChild -or
+            -not $entry.PSIsContainer -or
+            ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            $occupied += $entry.FullName
+        }
+    }
 }
 $plan = Get-SentinelFreshClusterCapacity -FreeMemoryBytes ([long]$os.FreePhysicalMemory * 1KB) `
     -FreeDiskBytes ([long]$volume.SizeRemaining) -VMs $vms -OccupiedPaths $occupied

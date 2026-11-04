@@ -1,5 +1,7 @@
 # Separate two-node Kubernetes bootstrap
 
+**Current live state (operator report, 2026-11-04):** exactly two fresh VMs `cp01` and `w01` were built through one uninterrupted BOOTSTRAP on Git commit `30c7927fbbbd57baef2e0516cf7ba7b210a238f6`, then both successfully recovered after the separately approved sequential reboot test. Final markers: `FRESH_BOOTSTRAP_E2E_PASS` and `FRESH_REBOOT_PERSISTENCE_PASS`. See [clean acceptance](CLEAN-BOOTSTRAP-ACCEPTANCE.md). Historical notes below describe the older `sentinel-fresh-*` experiment and **do not** describe the current VM inventory. The `cp01/w01` cluster is occupied; do not rerun BOOTSTRAP on it.
+
 Status: first operator-run live build completed with in-run code corrections;
 network acceptance and post-cleanup verification passed on 3 November 2026.
 The original sandbox passed operator-run verification on 2 November 2026
@@ -30,8 +32,8 @@ repeatable rebuilds, or restoration of the powered-off original cluster.
 
 | Role | Name | Private address | Management/private MAC |
 | --- | --- | --- | --- |
-| Control plane | sentinel-fresh-cp01 | 10.78.0.30 | 02AA78000130 / 02AA78000030 |
-| Worker | sentinel-fresh-w01 | 10.78.0.31 | 02AA78000131 / 02AA78000031 |
+| Control plane | cp01 | 10.78.0.30 | 02AA78000130 / 02AA78000030 |
+| Worker | w01 | 10.78.0.31 | 02AA78000131 / 02AA78000031 |
 
 Both guests: 4 GiB static RAM, 2 vCPUs, 60 GiB dynamic VHDX capacity.
 Storage: `C:\Sentinel\FreshCluster\VMs\<name>`. Existing switches:

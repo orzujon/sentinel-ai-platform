@@ -92,6 +92,7 @@ jobs:
           .\infrastructure\level1\tests\Test-FreshClusterPlan.ps1
           .\infrastructure\level1\tests\Test-FreshCluster.ps1
           .\infrastructure\level1\tests\Test-FreshClusterHost.ps1
+          .\infrastructure\level1\tests\Test-CleanBootstrapAcceptance.ps1
           .\infrastructure\level1\tests\Test-SandboxPower.ps1
           .\infrastructure\level1\tests\Test-FreshSshTrust.ps1
       - name: Exercise cross-platform guest KVP publisher offline tests on Windows

@@ -9,11 +9,11 @@
     - name: Require exactly the new cluster inventory
       ansible.builtin.assert:
         that:
-          - groups['sentinel_sandbox'] | sort == ['sentinel-fresh-cp01', 'sentinel-fresh-w01']
-          - groups['sentinel_control_plane'] == ['sentinel-fresh-cp01']
-          - groups['sentinel_workers'] == ['sentinel-fresh-w01']
-          - ansible_host == ('10.78.0.30' if inventory_hostname == 'sentinel-fresh-cp01' else '10.78.0.31')
-          - sentinel_fresh_stage in ['readiness', 'baseline', 'repository', 'packages', 'init', 'cni', 'join', 'verify', 'network-test']
+          - groups['sentinel_sandbox'] | sort == ['cp01', 'w01']
+          - groups['sentinel_control_plane'] == ['cp01']
+          - groups['sentinel_workers'] == ['w01']
+          - ansible_host == ('10.78.0.30' if inventory_hostname == 'cp01' else '10.78.0.31')
+          - sentinel_fresh_stage in ['readiness', 'baseline', 'repository', 'packages', 'init', 'cni', 'join', 'verify', 'network-test', 'reboot-test']
     - name: Wait a bounded time for firstboot completion after KVP publication
       ansible.builtin.command:
         argv: [timeout, '600', cloud-init, status, --wait]
@@ -66,18 +66,18 @@
         argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, nodes, -o, json]
       register: fresh_nodes
       changed_when: false
-      when: sentinel_fresh_stage in ['cni', 'join', 'verify', 'network-test']
+      when: sentinel_fresh_stage in ['cni', 'join', 'verify', 'network-test', 'reboot-test']
     - name: Read recorded kubeadm network configuration
       ansible.builtin.command:
         argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, -n, kube-system, get, configmap, kubeadm-config, -o, json]
       register: fresh_cluster_config
       changed_when: false
-      when: sentinel_fresh_stage in ['cni', 'join', 'verify', 'network-test']
+      when: sentinel_fresh_stage in ['cni', 'join', 'verify', 'network-test', 'reboot-test']
     - name: Reject old clusters and unexpected node registrations
       ansible.builtin.assert:
         that:
-          - "'sentinel-fresh-cp01' in ((fresh_nodes.stdout | from_json)['items'] | map(attribute='metadata.name') | list)"
-          - "((fresh_nodes.stdout | from_json)['items'] | map(attribute='metadata.name') | list | difference(['sentinel-fresh-cp01', 'sentinel-fresh-w01'])) | length == 0"
+          - "'cp01' in ((fresh_nodes.stdout | from_json)['items'] | map(attribute='metadata.name') | list)"
+          - "((fresh_nodes.stdout | from_json)['items'] | map(attribute='metadata.name') | list | difference(['cp01', 'w01'])) | length == 0"
           - "((fresh_cluster_config.stdout | from_json).data.ClusterConfiguration | from_yaml).networking.podSubnet == '10.245.0.0/16'"
           - "((fresh_cluster_config.stdout | from_json).data.ClusterConfiguration | from_yaml).networking.serviceSubnet == '10.112.0.0/16'"
-      when: sentinel_fresh_stage in ['cni', 'join', 'verify', 'network-test']
+      when: sentinel_fresh_stage in ['cni', 'join', 'verify', 'network-test', 'reboot-test']

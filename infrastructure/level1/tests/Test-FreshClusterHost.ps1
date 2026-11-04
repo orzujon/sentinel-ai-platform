@@ -35,7 +35,7 @@ $module=Import-Module (Join-Path $PSScriptRoot '..\src\Sentinel.FreshCluster.psm
     }
     $script:TestRoutes=@([pscustomobject]@{DestinationPrefix='10.244.0.0/16'},[pscustomobject]@{DestinationPrefix='10.96.0.0/12'})
     Assert-SentinelFreshHost -Node control-plane -ForCreation
-    $script:TestVMs=@([pscustomobject]@{Name='SENTINEL-FRESH-CP01'})
+    $script:TestVMs=@([pscustomobject]@{Name='CP01'})
     Expect-Blocked { Assert-SentinelFreshHost -Node control-plane -ForCreation }
     $script:TestVMs=@()
     # Regression: -All includes management-OS adapters without IPAddresses.

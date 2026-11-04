@@ -9,7 +9,7 @@ identities, then reuse the existing Ansible playbooks through a scoped runner.
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('PLAN','BOOTSTRAP','CREATE','TRUST','READINESS','BASELINE','REPOSITORY','PACKAGES','INIT','CNI','JOIN','VERIFY','NETWORK-TEST')]
+    [ValidateSet('PLAN','BOOTSTRAP','CREATE','TRUST','READINESS','BASELINE','REPOSITORY','PACKAGES','INIT','CNI','JOIN','VERIFY','NETWORK-TEST','REBOOT-TEST')]
     [string]$Stage = 'PLAN',
     [ValidateSet('control-plane','worker')][string]$Node,
     [string]$ImagePath,
@@ -42,6 +42,9 @@ Import-Module (Join-Path $PSScriptRoot '..\src\Sentinel.FreshCluster.psm1') -For
 Import-Module (Join-Path $PSScriptRoot '..\src\Sentinel.WslPaths.psm1') -Force
 if ($Stage -eq 'PLAN') {
     & (Join-Path $PSScriptRoot 'Get-SentinelFreshClusterPlan.ps1')
+    if (@(Get-VM -ErrorAction Stop).Count -ne 0) {
+        throw 'BLOCKED: clean cp01/w01 acceptance requires an empty Hyper-V VM inventory'
+    }
     Assert-SentinelFreshHost -Node control-plane -ForCreation
     Assert-SentinelFreshHost -Node worker -ForCreation
     Write-Host 'FRESH_HOST_PLAN_PASS: current capacity and observed host topology pass; image/controller/guest gates remain.'
@@ -64,6 +67,20 @@ function Assert-FreshController {
 }
 Assert-FreshController
 if ($Stage -eq 'BOOTSTRAP') {
+    # A clean acceptance run must start without registered Hyper-V guests.
+    if (@(Get-VM -ErrorAction Stop).Count -ne 0) {
+        throw 'BLOCKED: clean BOOTSTRAP requires zero registered Hyper-V VMs'
+    }
+    $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
+    $revision = @(& git -C $repoRoot rev-parse HEAD)
+    if ($LASTEXITCODE -ne 0 -or $revision.Count -ne 1 -or $revision[0] -cnotmatch '^[0-9a-f]{40}$') {
+        throw 'BLOCKED: clean BOOTSTRAP requires a resolvable Git commit'
+    }
+    $changes = @(& git -C $repoRoot status --porcelain)
+    if ($LASTEXITCODE -ne 0 -or $changes.Count -gt 0) {
+        throw 'BLOCKED: clean BOOTSTRAP requires a clean Git working tree'
+    }
+    Write-Host ("FRESH_BOOTSTRAP_REVISION_PIN: git={0} VMNames=cp01,w01" -f $revision[0])
     # Both target plans must pass before creating either VM. This is a clean
     # build only; a later invocation refuses occupied names rather than replaying.
     $creator = Join-Path $PSScriptRoot 'New-SentinelFreshVM.ps1'
@@ -106,7 +123,7 @@ if ($Stage -eq 'BOOTSTRAP') {
         if ($next -eq 'CNI') { $argsForStage.FlannelSHA256 = $FlannelSHA256 }
         & $self @argsForStage
     }
-    Write-Host 'FRESH_BOOTSTRAP_E2E_PASS: both fresh nodes, KVP, pinned SSH, packages, Kubernetes and active network checks passed'
+    Write-Host ("FRESH_BOOTSTRAP_E2E_PASS: cp01+w01 Git={0}; KVP, pinned SSH, packages, Kubernetes and active network checks passed" -f $revision[0])
     return
 }
 if ($Stage -eq 'CREATE') {
@@ -131,6 +148,10 @@ if ($identities.Count -ne 2 -or $identities[0].vmId -eq $identities[1].vmId -or
     $identities[0].fingerprint -ceq $identities[1].fingerprint) {
     throw 'BLOCKED: two independent guest identities required'
 }
+if ($Stage -eq 'REBOOT-TEST') {
+    # Verify Kubernetes is healthy before the disruptive test.
+    & $PSCommandPath -Stage VERIFY -WSLPrivateKey $WSLPrivateKey
+}
 $runner = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\ansible\fresh_cluster.py'))
 $arguments = @('-d','Ubuntu-26.04','--exec','python3', (ConvertTo-SentinelWslMountPath $runner),
     '--stage',$Stage.ToLowerInvariant(),'--key',$WSLPrivateKey)
@@ -138,3 +159,8 @@ if ($Stage -notin $readOnly) { $arguments += @('--approval',$Approval) }
 if ($Stage -eq 'CNI') { $arguments += @('--flannel-sha256',$FlannelSHA256) }
 & wsl.exe @arguments
 if ($LASTEXITCODE -ne 0) { throw "BLOCKED: fresh stage $Stage failed; no automatic retry, rollback or deletion" }
+if ($Stage -eq 'REBOOT-TEST') {
+    & $PSCommandPath -Stage VERIFY -WSLPrivateKey $WSLPrivateKey
+    & $PSCommandPath -Stage NETWORK-TEST -WSLPrivateKey $WSLPrivateKey -Approval FRESH_NETWORK_TEST
+    Write-Host 'FRESH_REBOOT_PERSISTENCE_PASS: cp01+w01 rebooted sequentially; Kubernetes, DNS/CNI and live cross-node/service tests passed.'
+}

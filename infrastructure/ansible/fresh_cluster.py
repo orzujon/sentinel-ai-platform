@@ -20,7 +20,7 @@ import yaml
 
 from reconcile import retrieve_verified_release
 
-NODES = {"sentinel-fresh-cp01": "10.78.0.30", "sentinel-fresh-w01": "10.78.0.31"}
+NODES = {"cp01": "10.78.0.30", "w01": "10.78.0.31"}
 ROOT = Path("/mnt/c/Sentinel/FreshCluster/VMs")
 POD_CIDR = "10.245.0.0/16"
 SERVICE_CIDR = "10.112.0.0/16"
@@ -36,6 +36,7 @@ STAGES = {
     "join": "130-reconcile-worker.yml",
     "verify": "140-cluster-validate.yml",
     "network-test": "150-active-network.yml",
+    "reboot-test": "170-fresh-reboot-persistence.yml",
 }
 READ_ONLY = {"readiness", "verify"}
 
@@ -100,8 +101,8 @@ def build_inventory(bindings: list[dict], key: str, trust: Path) -> dict:
             "ansible_python_interpreter": "/usr/bin/python3",
             "sentinel_expected_hostname": b["node"], "sentinel_expected_nonce": b["nonce"]}
     return {"all": {"children": {"sentinel_sandbox": {"hosts": hosts, "children": {
-        "sentinel_control_plane": {"hosts": {"sentinel-fresh-cp01": {}}},
-        "sentinel_workers": {"hosts": {"sentinel-fresh-w01": {}}}}}}}}
+        "sentinel_control_plane": {"hosts": {"cp01": {}}},
+        "sentinel_workers": {"hosts": {"w01": {}}}}}}}}
 
 
 def render_playbook(stage: str, source: str) -> str:

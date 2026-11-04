@@ -57,7 +57,7 @@ function Assert-SentinelKvpIdentity {
         $expected[$node] = '10.78.0.' + $Matches[1]
     }
     if ($FreshCluster) {
-        $expected = @{'sentinel-fresh-cp01'='10.78.0.30'; 'sentinel-fresh-w01'='10.78.0.31'}
+        $expected = @{'cp01'='10.78.0.30'; 'w01'='10.78.0.31'}
     }
     if (-not $expected.ContainsKey($node) -or [string]$ManifestEntry.ip -cne $expected[$node]) {
         throw 'BLOCKED: unknown or unpinned guest network identity'

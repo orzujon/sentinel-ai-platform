@@ -49,7 +49,7 @@ def validate_manifest(raw: dict) -> tuple[str, str, str]:
         if not match or raw["ip"] != "10.78.0." + match.group(1):
             raise Blocked("node/IP outside the approved disposable range")
     else:
-        fresh = {"sentinel-fresh-cp01": "10.78.0.30", "sentinel-fresh-w01": "10.78.0.31"}
+        fresh = {"cp01": "10.78.0.30", "w01": "10.78.0.31"}
         if name not in fresh or fresh[name] != raw["ip"]:
             raise Blocked("node/IP outside the separate fresh-cluster profile")
     nonce = raw["nonce"]

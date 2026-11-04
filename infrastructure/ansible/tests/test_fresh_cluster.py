@@ -20,7 +20,7 @@ spec.loader.exec_module(publisher)
 
 
 def binding(worker=False):
-    name = 'sentinel-fresh-w01' if worker else 'sentinel-fresh-cp01'
+    name = 'w01' if worker else 'cp01'
     suffix = '31' if worker else '30'
     manifest = dict(schema=3, purpose='sentinel-fresh-cluster-v1', node=name,
                     privateIP='10.78.0.'+suffix, managementMAC='02AA780001'+suffix,
@@ -43,7 +43,7 @@ class FreshClusterTests(unittest.TestCase):
     def test_cross_profile_and_unknown_seed_rejected(self):
         for node, ip in [('sentinel-l1-w01','10.78.0.11'), ('k8s-cp01','10.77.0.10'),
                          ('sentinel-e2e-auto20','10.78.0.20'), ('unknown',None),
-                         ('sentinel-fresh-w01','10.78.0.30')]:
+                         ('w01','10.78.0.30')]:
             with self.subTest(node=node), self.assertRaises(publisher.Blocked):
                 publisher.validate_manifest(dict(schema=3,node=node,ip=ip,nonce='a'*64))
 
@@ -78,6 +78,31 @@ class FreshClusterTests(unittest.TestCase):
                      b['trustedLine'].replace('ssh-ed25519','ssh-rsa')]:
             with self.assertRaises(fresh.Blocked): fresh.validate_binding(b['node'],b,line)
 
+    def test_identity_gate_covers_every_supported_stage(self):
+        # Regression: a stage added to the runner must also be allowed through
+        # the shared firstboot/cluster identity check run before each playbook.
+        import ast
+        identity = yaml.safe_load((fresh.PLAYBOOKS / "05-fresh-identity.yml").read_text())
+        gate = identity[0]["tasks"][0]["ansible.builtin.assert"]["that"]
+        stage_checks = [check for check in gate if check.startswith("sentinel_fresh_stage in ")]
+        self.assertEqual(len(stage_checks), 1)
+        allowed = set(ast.literal_eval(stage_checks[0].split(" in ", 1)[1]))
+        self.assertEqual(allowed, set(fresh.STAGES))
+
+        # A reboot occurs on an initialized cluster. All pre-reboot identity,
+        # node-name and Kubernetes network checks must remain enforced.
+        post_init_tasks = identity[1]["tasks"]
+        self.assertEqual(len(post_init_tasks), 3)
+        for task in post_init_tasks:
+            when = task["when"]
+            stages = set(ast.literal_eval(when.split(" in ", 1)[1]))
+            self.assertIn("reboot-test", stages)
+            self.assertIn("verify", stages)
+        self.assertNotIn("reboot-test", fresh.READ_ONLY)
+        with self.assertRaises(fresh.Blocked):
+            fresh.require_approval("reboot-test", None)
+        fresh.require_approval("reboot-test", "FRESH_REBOOT_TEST")
+
     def test_approvals_cannot_cross_stages(self):
         for stage in fresh.STAGES:
             if stage in fresh.READ_ONLY:
@@ -111,6 +136,37 @@ class FreshClusterTests(unittest.TestCase):
                 self.assertIn(fresh.POD_CIDR,rendered)
                 self.assertIn('10.96.0.0/12',source)
             if stage not in ('init','cni','network-test'): self.assertEqual(source,rendered)
+
+    def test_reboot_waits_for_kubelet_and_worker_node_ready(self):
+        # Regression: reboot module only waits for SSH; kubelet may still be
+        # 'activating' and must get a bounded, non-mutating startup window.
+        plays = yaml.safe_load((fresh.PLAYBOOKS / "170-fresh-reboot-persistence.yml").read_text())
+        self.assertEqual(len(plays), 2)
+        second = plays[1]
+        self.assertEqual(second["serial"], 1)
+        self.assertEqual(second["order"], "reverse_inventory")
+        tasks = second["tasks"]
+        reboots = [t for t in tasks if "ansible.builtin.reboot" in t]
+        self.assertEqual(len(reboots), 1)
+        services = next(t for t in tasks if t["name"].startswith("Wait for runtime services"))
+        self.assertEqual(services["loop"], ["kubelet", "containerd"])
+        self.assertEqual(services["retries"], 36)
+        self.assertEqual(services["delay"], 10)
+        self.assertIn("after_services.rc == 0", services["until"])
+        self.assertIn("'active'", services["until"])
+        self.assertEqual(services["changed_when"], False)
+        ready = next(t for t in tasks if t["name"].startswith("Require recovered Kubernetes Node"))
+        self.assertEqual(ready["delegate_to"], "cp01")
+        self.assertEqual(ready["retries"], 6)
+        self.assertEqual(ready["delay"], 10)
+        self.assertIn("node/{{ inventory_hostname }}", ready["ansible.builtin.command"]["argv"])
+        self.assertIn("after_node_ready.rc == 0", ready["until"])
+        self.assertLess(tasks.index(services), tasks.index(ready))
+        for component in ("Flannel", "CoreDNS"):
+            check = next(t for t in tasks if t["name"].startswith("Require " + component + " restored"))
+            self.assertEqual(check["delegate_to"], "cp01")
+            self.assertEqual(check["when"], "inventory_hostname == 'cp01'")
+        self.assertFalse(any("ansible.builtin.systemd_service" in t for t in tasks))
 
     def test_network_probes_accept_new_pod_cidr_and_reject_old(self):
         source=(fresh.PLAYBOOKS/fresh.STAGES['network-test']).read_text()

@@ -12,7 +12,7 @@ function Get-SentinelFreshClusterCapacity {
     )
     # Proposal only. Nothing returned by this function authorizes execution.
     $root = 'C:\Sentinel\FreshCluster\VMs'
-    $names = @('sentinel-fresh-cp01', 'sentinel-fresh-w01')
+    $names = @('cp01', 'w01')
     $protected = @(@('k8s-cp01', 'k8s-w01', 'sentinel-l1-cp01', 'sentinel-l1-w01',
         'sentinel-l1-regcp01', 'sentinel-l1-regw01', 'sentinel-e2e-auto20') +
         @($VMs | Where-Object { $_.Name -notin $names } | ForEach-Object { $_.Name }) | Sort-Object -Unique)
