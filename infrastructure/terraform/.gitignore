@@ -1,0 +1,11 @@
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/tfplan
+**/crash.log
+**/crash.*.log
+**/*.tfvars
+**/*.auto.tfvars
+!**/*.tfvars.example
+# Commit .terraform.lock.hcl after trusted init.
