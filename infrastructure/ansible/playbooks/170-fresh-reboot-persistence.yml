@@ -1,0 +1,88 @@
+---
+# EXACT cp01/w01 fresh-cluster only. Never applied in BOOTSTRAP.
+# Reboots one node at a time (worker first), after read-only VERIFY.
+# Ansible inventory is freshly constructed from the two KVP-verified,
+# known_hosts-pinned identities by fresh_cluster.py.
+- name: Check exactly two fresh cluster nodes before any reboot
+  hosts: sentinel_sandbox
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Require fixed two-node identity and exact approved stage
+      ansible.builtin.assert:
+        that:
+          - sentinel_fresh_stage == 'reboot-test'
+          - groups['sentinel_sandbox'] | sort == ['cp01', 'w01']
+          - groups['sentinel_control_plane'] == ['cp01']
+          - groups['sentinel_workers'] == ['w01']
+          - inventory_hostname in ['cp01', 'w01']
+    - name: Observe hostname
+      ansible.builtin.command:
+        argv: [hostname]
+      register: observed_hostname
+      changed_when: false
+    - name: Require matching hostname before reboot
+      ansible.builtin.assert:
+        that:
+          - observed_hostname.stdout | trim == inventory_hostname
+    - name: Require an initialized Kubernetes node
+      ansible.builtin.stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_config
+    - name: Require persisted kubelet identity
+      ansible.builtin.assert:
+        that:
+          - kubelet_config.stat.exists
+          - kubelet_config.stat.isreg
+    - name: Inspect kubelet and containerd health before reboot
+      ansible.builtin.command:
+        argv: [systemctl, is-active, "{{ item }}"]
+      loop: [kubelet, containerd]
+      register: before_services
+      changed_when: false
+    - name: Block on failed runtime services
+      ansible.builtin.assert:
+        that:
+          - (before_services.results | map(attribute='stdout') | list) == ['active', 'active']
+
+- name: Reboot fresh worker then control plane sequentially
+  hosts: sentinel_sandbox
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  serial: 1
+  order: reverse_inventory
+  tasks:
+    - name: Reboot exactly this guest and await pinned-SSH return
+      ansible.builtin.reboot:
+        reboot_timeout: 600
+        connect_timeout: 15
+        post_reboot_delay: 10
+        test_command: /bin/true
+    - name: Confirm original hostname survived reboot
+      ansible.builtin.command:
+        argv: [hostname]
+      register: after_hostname
+      changed_when: false
+    - name: Confirm runtime services restarted after reboot
+      ansible.builtin.command:
+        argv: [systemctl, is-active, "{{ item }}"]
+      loop: [kubelet, containerd]
+      register: after_services
+      changed_when: false
+    - name: Confirm runtime services remain enabled
+      ansible.builtin.command:
+        argv: [systemctl, is-enabled, "{{ item }}"]
+      loop: [kubelet, containerd]
+      register: enabled_services
+      changed_when: false
+    - name: Assert preserved node and runtime state
+      ansible.builtin.assert:
+        that:
+          - after_hostname.stdout | trim == inventory_hostname
+          - (after_services.results | map(attribute='stdout') | list) == ['active', 'active']
+          - (enabled_services.results | map(attribute='stdout') | list) == ['enabled', 'enabled']
+    - name: Emit exact node recovery marker
+      ansible.builtin.debug:
+        msg: "FRESH_REBOOT_NODE_PASS: {{ inventory_hostname }} kubelet/containerd operational"
