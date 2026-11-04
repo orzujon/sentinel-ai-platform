@@ -2,7 +2,7 @@
 module "platform_namespace" {
   source = "../../../modules/namespace"
 
-  name = "sentinel-platform"
+  name   = "sentinel-platform"
   labels = {
     "app.kubernetes.io/part-of"        = "sentinel"
     "app.kubernetes.io/managed-by"     = "terraform"
