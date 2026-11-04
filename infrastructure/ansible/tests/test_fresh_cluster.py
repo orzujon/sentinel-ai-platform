@@ -137,6 +137,37 @@ class FreshClusterTests(unittest.TestCase):
                 self.assertIn('10.96.0.0/12',source)
             if stage not in ('init','cni','network-test'): self.assertEqual(source,rendered)
 
+    def test_reboot_waits_for_kubelet_and_worker_node_ready(self):
+        # Regression: reboot module only waits for SSH; kubelet may still be
+        # 'activating' and must get a bounded, non-mutating startup window.
+        plays = yaml.safe_load((fresh.PLAYBOOKS / "170-fresh-reboot-persistence.yml").read_text())
+        self.assertEqual(len(plays), 2)
+        second = plays[1]
+        self.assertEqual(second["serial"], 1)
+        self.assertEqual(second["order"], "reverse_inventory")
+        tasks = second["tasks"]
+        reboots = [t for t in tasks if "ansible.builtin.reboot" in t]
+        self.assertEqual(len(reboots), 1)
+        services = next(t for t in tasks if t["name"].startswith("Wait for runtime services"))
+        self.assertEqual(services["loop"], ["kubelet", "containerd"])
+        self.assertEqual(services["retries"], 36)
+        self.assertEqual(services["delay"], 10)
+        self.assertIn("after_services.rc == 0", services["until"])
+        self.assertIn("'active'", services["until"])
+        self.assertEqual(services["changed_when"], False)
+        ready = next(t for t in tasks if t["name"].startswith("Require recovered Kubernetes Node"))
+        self.assertEqual(ready["delegate_to"], "cp01")
+        self.assertEqual(ready["retries"], 6)
+        self.assertEqual(ready["delay"], 10)
+        self.assertIn("node/{{ inventory_hostname }}", ready["ansible.builtin.command"]["argv"])
+        self.assertIn("after_node_ready.rc == 0", ready["until"])
+        self.assertLess(tasks.index(services), tasks.index(ready))
+        for component in ("Flannel", "CoreDNS"):
+            check = next(t for t in tasks if t["name"].startswith("Require " + component + " restored"))
+            self.assertEqual(check["delegate_to"], "cp01")
+            self.assertEqual(check["when"], "inventory_hostname == 'cp01'")
+        self.assertFalse(any("ansible.builtin.systemd_service" in t for t in tasks))
+
     def test_network_probes_accept_new_pod_cidr_and_reject_old(self):
         source=(fresh.PLAYBOOKS/fresh.STAGES['network-test']).read_text()
         rendered=fresh.render_playbook('network-test',source)
