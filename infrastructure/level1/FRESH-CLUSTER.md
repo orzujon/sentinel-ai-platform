@@ -30,8 +30,8 @@ repeatable rebuilds, or restoration of the powered-off original cluster.
 
 | Role | Name | Private address | Management/private MAC |
 | --- | --- | --- | --- |
-| Control plane | sentinel-fresh-cp01 | 10.78.0.30 | 02AA78000130 / 02AA78000030 |
-| Worker | sentinel-fresh-w01 | 10.78.0.31 | 02AA78000131 / 02AA78000031 |
+| Control plane | cp01 | 10.78.0.30 | 02AA78000130 / 02AA78000030 |
+| Worker | w01 | 10.78.0.31 | 02AA78000131 / 02AA78000031 |
 
 Both guests: 4 GiB static RAM, 2 vCPUs, 60 GiB dynamic VHDX capacity.
 Storage: `C:\Sentinel\FreshCluster\VMs\<name>`. Existing switches:
