@@ -1,8 +1,6 @@
 # Sentinel Level 1 — clean cluster acceptance (cp01 + w01)
 
-**State:** development PR. Not yet a successful uninterrupted run.
-Operator reports removal of every old Hyper-V VM. Verify with a fresh
-`Get-VM` result before attempting any provisioning.
+**State:** operator-reported clean bootstrap **PASS**, reboot persistence **PASS** on 2026-11-04. Previous VMs were retired; current cluster contains `cp01` and `w01`. Acceptance is based on terminal output supplied by the operator; private audit JSON files have not been independently inspected.
 
 ## Target — exactly two new Ubuntu guests
 
@@ -115,5 +113,15 @@ integrity checks stay mandatory.
 Success requires one unchanged source revision and verified image/network
 hashes, exactly two new VMs, both Ready, working Kubernetes control plane,
 CNI/CoreDNS, cross-node/Service tests, a graceful ordered reboot of both
-VM guests, and post-reboot health/network verification. This acceptance is
-**not yet achieved merely by committing this PR or passing CI**.
+VM guests, and post-reboot health/network verification. This acceptance has been **reported successful from the live cluster**, not inferred from CI. See evidence below. Reproducibility, failure-injection self-healing, and independent artifact provenance acceptance are **not** established by these tests.
+
+
+## Operator-reported live evidence — 2026-11-04
+
+- Clean BOOTSTRAP completed on the unchanged source revision `30c7927fbbbd57baef2e0516cf7ba7b210a238f6`. The terminal emitted `FRESH_STAGE_PASS: network-test` and `FRESH_BOOTSTRAP_E2E_PASS`. Original network audit: `/home/orzu/.local/state/sentinel-fresh/network-test-v74tj2k7/audit.json`.
+- The initial reboot validation failed safely on a stage allowlist, before rebooting; the next run rebooted `w01` and observed `kubelet` still `activating`. Both gaps were corrected with regression tests. These failures do **not** count as successful reboot tests.
+- The final approved `REBOOT-TEST` emitted `FRESH_STAGE_PASS: network-test` and `FRESH_REBOOT_PERSISTENCE_PASS` after sequential guest reboots, post-reboot VERIFY and active network checks. Final reported network audit: `/home/orzu/.local/state/sentinel-fresh/network-test-m6asfzne/audit.json`.
+- The operator independently inspected `sudo kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o wide` and `get pods -A`: `cp01` and `w01` both `Ready`, Kubernetes `v1.37.2`, containerd `v2.2.2`, Flannel two Running Pods, CoreDNS two Running Pods and control-plane static Pods Running.
+- Windows `kubectl` initially targeted the retired `10.77.0.10` address. Operator reports corrected kubeconfig access to `10.78.0.30`. Windows credential distribution is **not** part of this cluster-bootstrap acceptance and should be hardened to least privilege for application workflows.
+
+The first BOOTSTRAP evidence pins the source commit that actually ran; this later documentation and reboot-guard revision is not represented as the clean-build source. Do not replay BOOTSTRAP against the occupied VMs. Distinct audit JSON contents and long-term recovery trends still need independent validation.
