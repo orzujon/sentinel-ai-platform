@@ -143,6 +143,20 @@ function Assert-ExactTarget([object]$Spec,[array]$AllVMs) {
             }
         }
     }
+    # An optional nested VM config never authorises unrelated files left in
+    # outer Hyper-V directories. Enforce empty outer dirs when using nested layout.
+    if (Test-Path -LiteralPath $nested) {
+        foreach ($empty in @('Virtual Machines','Snapshots','Smart Paging','Virtual Hard Disks')) {
+            $p = Join-Path $folder $empty
+            if (Test-Path -LiteralPath $p) {
+                Assert-NoReparse $p
+                if (-not (Test-Path -LiteralPath $p -PathType Container) -or
+                    @(Get-ChildItem -LiteralPath $p -Force).Count -ne 0) {
+                    throw "BLOCKED: unowned content under outer Hyper-V folder: $p"
+                }
+            }
+        }
+    }
     foreach ($entry in @(Get-ChildItem -LiteralPath $folder -Force -ErrorAction Stop)) {
         if ($entry.Name -cnotin $topAllowed) {
             throw "BLOCKED: unknown file in cleanup target: $($entry.FullName)"
