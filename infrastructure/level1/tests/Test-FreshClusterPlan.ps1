@@ -29,7 +29,7 @@ $collector = Join-Path $PSScriptRoot '..\tools\Get-SentinelFreshClusterPlan.ps1'
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($collector, [ref]$tokens, [ref]$errors)
 Assert-True ($errors.Count -eq 0) 'Collector must parse'
 $allowed = @('Set-StrictMode','Import-Module','Join-Path','Get-CimInstance','Get-Volume',
-    'Get-VM','Test-Path','Get-SentinelFreshClusterCapacity','Select-Object',
+    'Get-VM','Test-Path','Get-Item','Get-ChildItem','Get-SentinelFreshClusterCapacity','Select-Object',
     'Get-VMSwitch','Get-NetRoute','ConvertTo-Json')
 $commands = $ast.FindAll({param($node) $node -is [System.Management.Automation.Language.CommandAst]}, $true)
 foreach ($command in $commands) {
