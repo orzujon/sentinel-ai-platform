@@ -20,7 +20,7 @@ spec.loader.exec_module(publisher)
 
 
 def binding(worker=False):
-    name = 'sentinel-fresh-w01' if worker else 'sentinel-fresh-cp01'
+    name = 'w01' if worker else 'cp01'
     suffix = '31' if worker else '30'
     manifest = dict(schema=3, purpose='sentinel-fresh-cluster-v1', node=name,
                     privateIP='10.78.0.'+suffix, managementMAC='02AA780001'+suffix,
@@ -43,7 +43,7 @@ class FreshClusterTests(unittest.TestCase):
     def test_cross_profile_and_unknown_seed_rejected(self):
         for node, ip in [('sentinel-l1-w01','10.78.0.11'), ('k8s-cp01','10.77.0.10'),
                          ('sentinel-e2e-auto20','10.78.0.20'), ('unknown',None),
-                         ('sentinel-fresh-w01','10.78.0.30')]:
+                         ('w01','10.78.0.30')]:
             with self.subTest(node=node), self.assertRaises(publisher.Blocked):
                 publisher.validate_manifest(dict(schema=3,node=node,ip=ip,nonce='a'*64))
 
