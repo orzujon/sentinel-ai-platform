@@ -3,7 +3,7 @@
     "items": [
       {
         "metadata": {
-          "name": "sentinel-fresh-cp01"
+          "name": "cp01"
         },
         "status": {
           "conditions": [
@@ -16,7 +16,7 @@
       },
       {
         "metadata": {
-          "name": "sentinel-fresh-w01"
+          "name": "w01"
         },
         "status": {
           "conditions": [
