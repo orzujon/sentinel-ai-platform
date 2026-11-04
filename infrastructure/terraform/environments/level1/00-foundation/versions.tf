@@ -1,0 +1,15 @@
+terraform {
+  required_version = ">= 1.17.1, < 2.0.0"
+
+  required_providers {
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "= 3.4.0"
+    }
+  }
+
+  # Native Windows Terraform only; out-of-repo state and local locking.
+  backend "local" {
+    path = "C:/Sentinel/TerraformState/level1/foundation.tfstate"
+  }
+}
