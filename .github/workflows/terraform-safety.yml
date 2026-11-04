@@ -28,3 +28,23 @@ jobs:
             terraform -chdir="$root" init -backend=false -input=false -no-color
             terraform -chdir="$root" validate -no-color
           done
+
+  windows-powershell-syntax:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse Windows state and cluster preflight scripts without execution
+        shell: powershell
+        run: |
+          $scripts = @(
+            'infrastructure/terraform/scripts/Initialize-SentinelTerraformState.ps1',
+            'infrastructure/terraform/scripts/Test-SentinelTerraformTarget.ps1'
+          )
+          foreach ($script in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [void][Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $PWD $script), [ref]$tokens, [ref]$errors
+            )
+            if (@($errors).Count -ne 0) { throw "PowerShell parser errors in $script" }
+          }
