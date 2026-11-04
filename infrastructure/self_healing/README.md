@@ -1,6 +1,6 @@
 # Sentinel Guardian L1 — first controlled self-healing experiment
 
-Status: **PR / offline demo only**. No fresh-cluster mutation has been performed.
+Status: **offline-tested Guardian demonstration, not deployed to the live cluster**. The accepted Kubernetes infrastructure contains exactly `cp01` and `w01`; this repository change does not itself deploy any workload or authorize live repair.
 
 ## First visible experiment: a zero-replica outage
 
@@ -43,8 +43,8 @@ Its container uses a restricted security context and 1 replica by default.
 Before any creation, **do not assume a WSL Kubernetes context is configured**:
 the existing fresh-cluster Ansible runner obtains access through
 identity-pinned SSH to the control plane, not necessarily through your local
-`kubectl`. We must first establish a read-only, identity-verified
-kubeconfig/context for this new workflow, inspect the exact two fresh nodes,
+`kubectl`. For live experiments use a distinct, identity-verified, least-privilege
+kubeconfig/context, inspect exactly `cp01` and `w01`,
 and separately approve installation of the disposable manifest. No code in
 this PR automatically obtains broad cluster-admin credentials or alters
 the running cluster.
@@ -90,8 +90,7 @@ The exact approval operands must come from the new *live* PLAN output.
 
 The tests use synthetic JSON and mocked calls. Both GitHub Actions and
 operator offline acceptance must pass before designing a live experiment.
-Clean BOOTSTRAP/rebuild validation remains a separate future milestone;
-do not run BOOTSTRAP against existing `sentinel-fresh-*` VMs.
+Clean BOOTSTRAP and controlled reboot acceptance **passed on 2026-11-04** for `cp01` and `w01`. Do not rerun BOOTSTRAP on this occupied cluster. The Guardian synthetic experiment is a separate, not-yet-executed milestone.
 
 ## Future research track
 
