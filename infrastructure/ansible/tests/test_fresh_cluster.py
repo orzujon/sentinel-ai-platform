@@ -78,6 +78,31 @@ class FreshClusterTests(unittest.TestCase):
                      b['trustedLine'].replace('ssh-ed25519','ssh-rsa')]:
             with self.assertRaises(fresh.Blocked): fresh.validate_binding(b['node'],b,line)
 
+    def test_identity_gate_covers_every_supported_stage(self):
+        # Regression: a stage added to the runner must also be allowed through
+        # the shared firstboot/cluster identity check run before each playbook.
+        import ast
+        identity = yaml.safe_load((fresh.PLAYBOOKS / "05-fresh-identity.yml").read_text())
+        gate = identity[0]["tasks"][0]["ansible.builtin.assert"]["that"]
+        stage_checks = [check for check in gate if check.startswith("sentinel_fresh_stage in ")]
+        self.assertEqual(len(stage_checks), 1)
+        allowed = set(ast.literal_eval(stage_checks[0].split(" in ", 1)[1]))
+        self.assertEqual(allowed, set(fresh.STAGES))
+
+        # A reboot occurs on an initialized cluster. All pre-reboot identity,
+        # node-name and Kubernetes network checks must remain enforced.
+        post_init_tasks = identity[1]["tasks"]
+        self.assertEqual(len(post_init_tasks), 3)
+        for task in post_init_tasks:
+            when = task["when"]
+            stages = set(ast.literal_eval(when.split(" in ", 1)[1]))
+            self.assertIn("reboot-test", stages)
+            self.assertIn("verify", stages)
+        self.assertNotIn("reboot-test", fresh.READ_ONLY)
+        with self.assertRaises(fresh.Blocked):
+            fresh.require_approval("reboot-test", None)
+        fresh.require_approval("reboot-test", "FRESH_REBOOT_TEST")
+
     def test_approvals_cannot_cross_stages(self):
         for stage in fresh.STAGES:
             if stage in fresh.READ_ONLY:
