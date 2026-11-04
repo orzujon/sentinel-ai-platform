@@ -86,6 +86,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Guard exact fresh-pair cleanup offline before any destructive operation
+        shell: powershell
+        run: .\infrastructure\level1\tests\Test-FreshClusterCleanup.ps1
       - name: Test separate fresh cluster gates and mocked host checks
         shell: powershell
         run: |
